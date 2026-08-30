@@ -61,7 +61,12 @@ export type QuoteResult = { ok: true; quote: Quote } | { ok: false; error: FxErr
  * "this feed is genuinely unhealthy" on a Tuesday. We use the clock to tell
  * those apart, which is the only way to give an agent a retry time it can trust.
  */
-function classify(err: unknown, now: Date, from?: string, to?: string): FxError {
+async function classify(
+  err: unknown,
+  now: Date,
+  from?: string,
+  to?: string
+): Promise<FxError> {
   const raw = err instanceof Error ? err.message : String(err)
   // viem puts "...reverted with the following reason:" on line one and the
   // actual reason on line two, so line one alone tells an agent nothing.
@@ -75,7 +80,7 @@ function classify(err: unknown, now: Date, from?: string, to?: string): FxError 
 
   if (/FX market is currently closed/i.test(raw) || (/no valid median/i.test(raw) && closedByClock)) {
     const opens = nextOpen(now)
-    const stale = from && to ? recall(from, to) : null
+    const stale = from && to ? await recall(from, to) : null
     return {
       code: 'market_closed',
       message: 'Global FX markets are closed. Rates resume when trading reopens.',
@@ -170,7 +175,7 @@ export async function getQuote(
 
     // Bank every live rate we see. This is what we serve back during the
     // weekend blackout, so the cache is only ever as good as our uptime.
-    if (Number.isFinite(rate) && rate > 0) remember(from.iso, to.iso, rate)
+    if (Number.isFinite(rate) && rate > 0) await remember(from.iso, to.iso, rate)
 
     // Route data is a nice-to-have; never fail a good quote because it errored.
     let route: string[] = [from.iso, to.iso]
@@ -203,7 +208,7 @@ export async function getQuote(
       },
     }
   } catch (err) {
-    return { ok: false, error: classify(err, now, from.iso, to.iso) }
+    return { ok: false, error: await classify(err, now, from.iso, to.iso) }
   }
 }
 

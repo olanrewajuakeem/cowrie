@@ -24,11 +24,14 @@
   "license": "MIT",
   "dependencies": {
     "@mento-protocol/mento-sdk": "^3.4.0",
+    "tsx": "^4.23.12",
     "viem": "^2.56.0"
   },
   "devDependencies": {
     "@types/node": "^26.4.0",
-    "tsx": "^4.23.12",
     "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }
