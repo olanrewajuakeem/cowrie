@@ -7,6 +7,7 @@
     "probe": "tsx src/probe.ts",
     "probe:pools": "tsx src/probe-pools.ts",
     "probe:fpmm": "tsx src/probe-fpmm.ts",
+    "mint": "tsx src/mint-agent.ts",
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "test": "echo \"no tests yet\" && exit 0"
