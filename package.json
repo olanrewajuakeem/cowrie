@@ -9,6 +9,7 @@
     "probe:fpmm": "tsx src/probe-fpmm.ts",
     "probe:swap": "tsx src/probe-swap.ts",
     "mint": "tsx src/mint-agent.ts",
+    "swap": "tsx src/execute-swap.ts",
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
     "test": "echo \"no tests yet\" && exit 0"

@@ -48,7 +48,38 @@ export interface UnsignedTx {
   value: string
   /** Pay gas in this ERC-20 instead of CELO. Celo-specific. */
   feeCurrency: string
+  /**
+   * Gas price DENOMINATED IN THE FEE CURRENCY.
+   *
+   * This is the trap that makes fee abstraction fail in practice. When gas is
+   * paid in an ERC-20, Celo expresses the block base fee in that token — but
+   * standard tooling (viem, ethers) estimates against CELO and produces a cap
+   * the node rejects with "max fee per gas less than block base fee". The
+   * correct values come from eth_gasPrice / eth_maxPriorityFeePerGas called
+   * WITH the fee-currency address as a parameter, which no library does by
+   * default. We do it here so the agent never has to discover this.
+   */
+  maxFeePerGas: string
+  maxPriorityFeePerGas: string
   description: string
+}
+
+/** Gas price in a given fee currency, via Celo's currency-aware RPC methods. */
+async function feeParams(
+  client: any,
+  feeCurrency: string
+): Promise<{ maxFeePerGas: bigint; maxPriorityFeePerGas: bigint }> {
+  const [price, tip] = await Promise.all([
+    client.request({ method: 'eth_gasPrice', params: [feeCurrency] }),
+    client.request({ method: 'eth_maxPriorityFeePerGas', params: [feeCurrency] }),
+  ])
+  // Double the observed price as headroom: the base fee can rise between our
+  // quote and the agent actually broadcasting, and an underpriced transaction
+  // is rejected outright rather than merely being slow.
+  return {
+    maxFeePerGas: BigInt(price) * 2n,
+    maxPriorityFeePerGas: BigInt(tip),
+  }
 }
 
 export interface SwapPlan {
@@ -146,6 +177,10 @@ export async function buildSwap(
 
     const router = built.params.to as `0x${string}`
     const transactions: UnsignedTx[] = []
+    const fees = await feeParams(
+      (mento as any).client ?? (mento as any).publicClient,
+      USDT_FEE_ADAPTER
+    )
 
     // Approval is standard ERC-20, so we read and encode it directly rather
     // than relying on another SDK signature. Only included when actually
@@ -172,6 +207,8 @@ export async function buildSwap(
         ),
         value: '0',
         feeCurrency: USDT_FEE_ADAPTER,
+        maxFeePerGas: String(fees.maxFeePerGas),
+        maxPriorityFeePerGas: String(fees.maxPriorityFeePerGas),
         description: `Approve Mento's router to spend ${amount} ${from.iso}. Required before the swap; send this first and wait for it to confirm.`,
       })
     }
@@ -181,6 +218,8 @@ export async function buildSwap(
       data: tag(built.params.data),
       value: String(built.params.value ?? '0'),
       feeCurrency: USDT_FEE_ADAPTER,
+      maxFeePerGas: String(fees.maxFeePerGas),
+      maxPriorityFeePerGas: String(fees.maxPriorityFeePerGas),
       description: `Swap ${amount} ${from.iso} for at least ${formatUnits(BigInt(built.amountOutMin), to.decimals)} ${to.iso}.`,
     })
 
