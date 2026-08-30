@@ -31,6 +31,7 @@ export type ErrorCode =
   | 'rate_unavailable'
   | 'unsupported_currency'
   | 'invalid_amount'
+  | 'invalid_request'
   | 'upstream_error'
 
 export interface FxError {
@@ -61,7 +62,7 @@ export type QuoteResult = { ok: true; quote: Quote } | { ok: false; error: FxErr
  * "this feed is genuinely unhealthy" on a Tuesday. We use the clock to tell
  * those apart, which is the only way to give an agent a retry time it can trust.
  */
-async function classify(
+export async function classifyError(
   err: unknown,
   now: Date,
   from?: string,
@@ -183,7 +184,10 @@ export async function getQuote(
     try {
       const r: any = await mento.routes.findRoute(from.address, to.address)
       if (r?.tokens?.length) {
-        route = r.tokens.map((t: any) => currencyLabel(currencies, t.symbol))
+        const labels = r.tokens.map((t: any) => currencyLabel(currencies, t.symbol))
+        // Mento normalises route ids alphabetically, so the reported order does
+        // not follow the direction of the trade. Correct it.
+        route = labels[0] === from.iso ? labels : [...labels].reverse()
       }
       if (typeof r?.costData?.totalCostPercent === 'number') {
         costPercent = r.costData.totalCostPercent
@@ -208,7 +212,7 @@ export async function getQuote(
       },
     }
   } catch (err) {
-    return { ok: false, error: await classify(err, now, from.iso, to.iso) }
+    return { ok: false, error: await classifyError(err, now, from.iso, to.iso) }
   }
 }
 

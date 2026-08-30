@@ -8,6 +8,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { getQuote } from './fx.js'
+import { buildSwap } from './swap.js'
 import { loadCurrencies, listCurrencies } from './tokens.js'
 import { marketState, isMarketOpen } from './market.js'
 import { allCached, cacheBackend } from './cache.js'
@@ -57,8 +58,10 @@ function serviceDescription() {
       'GET /pairs': 'Which pairs are quotable right now, and which are waiting on market hours.',
       'GET /status': 'FX market state and service health.',
       'GET /quote?from=USD&to=NGN&amount=100': 'Price an amount from one currency into another.',
+      'POST /swap': 'Build unsigned transactions that execute a conversion. Body: {from, to, amount, recipient}. Returns approval (when needed) and swap calldata with feeCurrency preset, so an agent holding no CELO can still settle.',
     },
     example: '/quote?from=USD&to=NGN&amount=100',
+    attribution_tag: 'celo_e46217d1e056',
     notes: [
       'Currencies accept ISO 4217 codes (USD, NGN) or Mento symbols (USDm, NGNm).',
       'Global FX markets close Friday 21:00 UTC and reopen Sunday 21:00 UTC. While closed, quotes return code "market_closed" with retry_after in seconds and, where known, the last observed rate.',
@@ -67,15 +70,29 @@ function serviceDescription() {
   }
 }
 
+/** Read and parse a JSON request body. Returns null if it is not valid JSON. */
+async function readBody(req: IncomingMessage): Promise<Record<string, string> | null> {
+  const chunks: Buffer[] = []
+  for await (const chunk of req) chunks.push(chunk as Buffer)
+  const raw = Buffer.concat(chunks).toString('utf8').trim()
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 export async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
   const path = url.pathname.replace(/\/+$/, '') || '/'
 
   if (req.method === 'OPTIONS') {
-    return json(res, 204, null, { 'access-control-allow-methods': 'GET, OPTIONS' })
+    return json(res, 204, null, { 'access-control-allow-methods': 'GET, POST, OPTIONS' })
   }
-  if (req.method !== 'GET') {
-    return json(res, 405, { error: { code: 'method_not_allowed', message: 'Use GET.' } })
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    return json(res, 405, { error: { code: 'method_not_allowed', message: 'Use GET or POST.' } })
   }
 
   try {
@@ -165,6 +182,47 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
       const headers: Record<string, string> = {}
       if (result.error.retry_after) headers['retry-after'] = String(result.error.retry_after)
 
+      return json(res, retryable ? 503 : 400, { error: result.error }, headers)
+    }
+
+    if (path === '/swap') {
+      // Accept POST with a JSON body, and GET with query params — an agent
+      // exploring the API should be able to try it from a URL bar first.
+      let input: Record<string, string> = Object.fromEntries(url.searchParams)
+      if (req.method === 'POST') {
+        const body = await readBody(req)
+        if (body === null) {
+          return json(res, 400, {
+            error: { code: 'invalid_request', message: 'Body must be valid JSON.' },
+          })
+        }
+        input = { ...input, ...body }
+      }
+
+      const { from, to, amount, recipient } = input
+      if (!from || !to || !amount || !recipient) {
+        return json(res, 400, {
+          error: {
+            code: 'invalid_request',
+            message: '"from", "to", "amount" and "recipient" are all required.',
+            example: {
+              method: 'POST',
+              path: '/swap',
+              body: { from: 'USD', to: 'USDC', amount: '10', recipient: '0xYourAgentWallet' },
+            },
+          },
+        })
+      }
+
+      const result = await buildSwap(from, to, amount, recipient, RPC_URL)
+      if (result.ok) return json(res, 200, result.plan)
+
+      const retryable =
+        result.error.code === 'market_closed' ||
+        result.error.code === 'rate_unavailable' ||
+        result.error.code === 'upstream_error'
+      const headers: Record<string, string> = {}
+      if (result.error.retry_after) headers['retry-after'] = String(result.error.retry_after)
       return json(res, retryable ? 503 : 400, { error: result.error }, headers)
     }
 

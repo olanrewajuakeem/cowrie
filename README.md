@@ -51,16 +51,16 @@ Some pairs cross no exchange rate at all. `USD → USDC` is a dollar for a dolla
 
 ## Endpoints
 
-| Endpoint | Cost | Purpose |
-|---|---|---|
-| `GET /` | free | Self-description, so an agent can learn the API without docs |
-| `GET /currencies` | free | Every currency, ISO code, on-chain address, decimals |
-| `GET /pairs` | free | Which pairs are quotable now vs waiting on market hours |
-| `GET /status` | free | Market state and service health |
-| `GET /quote` | free | Price an amount between two currencies |
-| `POST /swap` | **x402** | Unsigned transaction, gas payable in stablecoin |
+| Endpoint | Purpose |
+|---|---|
+| `GET /` | Self-description, so an agent can learn the API without docs |
+| `GET /currencies` | Every currency, ISO code, on-chain address, decimals |
+| `GET /pairs` | Which pairs are quotable now vs waiting on market hours |
+| `GET /status` | Market state and service health |
+| `GET /quote` | Price an amount between two currencies |
+| `POST /swap` | Unsigned transactions that execute a conversion |
 
-Reads are free deliberately — an agent must be able to explore and evaluate the service before paying. Only execution costs money.
+**Everything is currently free.** x402 pay-per-call is the intended model for `/swap` and is not yet implemented — this table describes what the service does today, not what is planned.
 
 ### Quote
 
@@ -69,6 +69,17 @@ GET /quote?from=USD&to=NGN&amount=100
 ```
 
 Currencies accept ISO 4217 codes (`USD`, `NGN`) or Mento symbols (`USDm`, `NGNm`). Tether's on-chain symbol is `USD₮` with a Unicode tugrik sign; `USDT` is aliased to it, because no agent will type that.
+
+### Swap
+
+```
+POST /swap
+{ "from": "USD", "to": "USDC", "amount": "10", "recipient": "0xYourAgentWallet" }
+```
+
+Returns unsigned transactions — an ERC-20 approval (only when the current allowance is insufficient) followed by the swap. Cowrie never takes custody of funds and never asks for a key; it assembles calldata and hands it back.
+
+Every transaction carries the ERC-8021 attribution tag `celo_e46217d1e056` as a data suffix, and `feeCurrency` preset so gas is paid in stablecoin.
 
 ## Gas without CELO
 

@@ -7,6 +7,7 @@
     "probe": "tsx src/probe.ts",
     "probe:pools": "tsx src/probe-pools.ts",
     "probe:fpmm": "tsx src/probe-fpmm.ts",
+    "probe:swap": "tsx src/probe-swap.ts",
     "mint": "tsx src/mint-agent.ts",
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",
@@ -23,6 +24,7 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@celo/attribution-tags": "^0.3.0",
     "@mento-protocol/mento-sdk": "^3.4.0",
     "tsx": "^4.23.12",
     "viem": "^2.56.0"
