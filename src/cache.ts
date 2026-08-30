@@ -19,8 +19,15 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 const CACHE_FILE = process.env.COWRIE_CACHE ?? '.cache/rates.json'
-const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
-const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
+
+/**
+ * Vercel's Upstash integration injects KV_REST_API_URL / KV_REST_API_TOKEN,
+ * while a database created directly at upstash.com gives you
+ * UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN. Accept either, so the
+ * deployment works no matter which route was taken to create it.
+ */
+const REDIS_URL = process.env.KV_REST_API_URL ?? process.env.UPSTASH_REDIS_REST_URL
+const REDIS_TOKEN = process.env.KV_REST_API_TOKEN ?? process.env.UPSTASH_REDIS_REST_TOKEN
 const HASH_KEY = 'cowrie:rates'
 
 const useRedis = Boolean(REDIS_URL && REDIS_TOKEN)
