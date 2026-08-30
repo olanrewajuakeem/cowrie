@@ -11,7 +11,26 @@
  * quoting a deprecated token is exactly the kind of bug nobody notices until
  * money moves.
  */
-import { Mento, ChainId } from '@mento-protocol/mento-sdk'
+import { createRequire } from 'node:module'
+import type { Mento as MentoClass } from '@mento-protocol/mento-sdk'
+
+/**
+ * Loaded through createRequire rather than a plain import.
+ *
+ * @mento-protocol/mento-sdk v3.4.0 ships a broken ESM build: dist/esm/index.js
+ * imports "./core/constants/chainId" with no .js extension, which Node's ESM
+ * loader rejects outright (ERR_MODULE_NOT_FOUND). tsx tolerates it locally,
+ * so the bug only surfaces in production on plain Node.
+ *
+ * The package's CommonJS build is fine, and createRequire reaches it directly.
+ * The `import type` above is erased at compile time, so we keep full typing
+ * without triggering the broken ESM resolution at runtime.
+ */
+const require = createRequire(import.meta.url)
+const { Mento, ChainId } = require('@mento-protocol/mento-sdk') as {
+  Mento: typeof MentoClass
+  ChainId: { CELO: number; CELO_SEPOLIA: number }
+}
 
 /** ISO 4217 code -> Mento token symbol. The `m` suffix is Mento's convention. */
 export const ISO_TO_MENTO: Record<string, string> = {
@@ -64,10 +83,10 @@ export interface Currency {
 }
 
 let registry: Map<string, Currency> | null = null
-let mentoClient: Mento | null = null
+let mentoClient: MentoClass | null = null
 
 /** Shared Mento client. Created once — each `create` call does chain discovery. */
-export async function getMento(rpcUrl?: string): Promise<Mento> {
+export async function getMento(rpcUrl?: string): Promise<MentoClass> {
   if (!mentoClient) {
     mentoClient = rpcUrl
       ? await Mento.create(ChainId.CELO, rpcUrl)

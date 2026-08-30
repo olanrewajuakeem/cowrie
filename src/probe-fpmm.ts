@@ -47,17 +47,23 @@ await section('POOL DETAILS by address (reserves?)', async () => {
 
 // 2. How many routes exist for a pair that has BOTH pool types? If the SDK
 //    returns two, we can choose the FPMM one deliberately.
+// getRoutes() takes no pair arguments — it returns every route on the protocol,
+// so we filter by id ourselves.
 await section('ALL ROUTES: USDm -> EURm', async () => {
-  const routes: any[] = await mento.routes.getRoutes(USDm as any, EURm as any)
-  console.log(`${routes.length} route(s)`)
+  const all = await mento.routes.getRoutes()
+  const routes = all.filter((r: any) => /USDm/.test(r.id) && /EURm/.test(r.id))
+  console.log(`${routes.length} route(s) of ${all.length} total`)
   console.log(dump(routes))
 })
 
 // 3. The same for naira — expected to be oracle-only, but confirm it.
 await section('ALL ROUTES: USDm -> NGNm', async () => {
-  const routes: any[] = await mento.routes.getRoutes(USDm as any, NGNm as any)
-  console.log(`${routes.length} route(s)`)
-  console.log(dump(routes.map((r) => ({ id: r.id, types: r.path?.map((p: any) => p.poolType) }))))
+  const all = await mento.routes.getRoutes()
+  const routes = all.filter((r: any) => /NGNm/.test(r.id))
+  console.log(`${routes.length} NGN route(s) of ${all.length} total`)
+  console.log(
+    dump(routes.map((r: any) => ({ id: r.id, types: r.path?.map((p: any) => p.poolType) })))
+  )
 })
 
 // 4. Is the halt at the router level or the pool level? A direct quote on a
