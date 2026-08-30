@@ -106,6 +106,7 @@ if (answer.trim().toLowerCase() !== 'yes') {
 // reverts — which is exactly the failure an agent hits when a service hands
 // back a swap without its approval.
 const hashes: `0x${string}`[] = []
+let lastBlock = 0n
 for (const [i, tx] of body.transactions.entries()) {
   console.log(`\n[${i + 1}/${body.transactions.length}] ${tx.description}`)
   // Use the fee values Cowrie returned. They are denominated in the fee
@@ -126,6 +127,7 @@ for (const [i, tx] of body.transactions.entries()) {
   console.log(`  sent    ${hash}`)
   console.log(`  https://celoscan.io/tx/${hash}`)
   const receipt = await publicClient.waitForTransactionReceipt({ hash })
+  lastBlock = receipt.blockNumber
   console.log(`  status  ${receipt.status}  (gas ${receipt.gasUsed})`)
   if (receipt.status !== 'success') {
     console.error('  Transaction reverted. Stopping before sending the rest.')
@@ -146,14 +148,20 @@ for (const hash of hashes) {
   }
 }
 
+// Pin both reads to the block the last transaction landed in. Reading
+// "latest" straight after a receipt can hit a load-balanced node that has not
+// applied the block yet, which reports balances as though nothing happened.
 const usdtAfter = (await publicClient.readContract({
   address: USDT_TOKEN,
   abi: erc20,
   functionName: 'balanceOf',
   args: [account.address],
-  blockNumber: await publicClient.getBlockNumber(),
+  blockNumber: lastBlock,
 })) as bigint
-const celoAfter = await publicClient.getBalance({ address: account.address })
+const celoAfter = await publicClient.getBalance({
+  address: account.address,
+  blockNumber: lastBlock,
+})
 
 console.log(`\nbalances after:   ${formatUnits(celoAfter, 18)} CELO, ${formatUnits(usdtAfter, 6)} USDT`)
 console.log(`CELO delta:       ${formatUnits(celoAfter - celoBefore, 18)}`)
