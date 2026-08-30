@@ -2,6 +2,8 @@
 
 **Foreign exchange for autonomous agents, on Celo.**
 
+🟢 **Live:** https://cowrie-seven.vercel.app · **ERC-8004 Agent ID:** [9796](https://celoscan.io/nft/0x8004a169fb4a3325136eb29fa0ceb6d2e539a432/9796)
+
 An agent holding stablecoins cannot open a bank account, verify an email, or click through an API signup. Every existing FX API assumes a human did that work first. Cowrie assumes nobody did — it takes payment per call over [x402](https://x402.celo.org/), from the wallet the agent already has.
 
 Built for the Celo **Agents at Work** hackathon.
@@ -105,7 +107,15 @@ Optional environment:
 
 ## How it was built
 
-Every fact here was verified against Celo mainnet rather than taken from documentation — the published Mento docs describe an API that does not match the shipped SDK, and the weekend blackout is documented nowhere. The probe scripts used to establish all of it are kept in `src/probe*.ts`.
+Every fact here was verified against Celo mainnet rather than taken from documentation. The probe scripts used to establish it all are kept in `src/probe*.ts` rather than deleted, because the findings are not written down anywhere else.
+
+Three things we hit that are worth recording:
+
+**The published Mento docs describe an API the SDK does not have.** `tokens.list()`, `routes.find()` and `pools.list()` appear in the documentation; the shipped v3.4.0 exposes `tokens.getStableTokens()`, `routes.findRoute()` and `pools.getPools()`. We read the `.d.ts` files and reflected over the objects at runtime instead.
+
+**The SDK's ESM build is broken.** `dist/esm/index.js` imports `./core/constants/chainId` with no file extension, which Node's ESM loader rejects with `ERR_MODULE_NOT_FOUND`. It only surfaces in production, because `tsx` tolerates it locally. Cowrie loads the working CommonJS build through `createRequire` — see [src/tokens.ts](src/tokens.ts).
+
+**`isPairTradable` disagrees with `getAmountOut`.** Mento reported `USDm/NGNm` as tradable while the quote reverted with `no valid median`. Any agent trusting that flag walks straight into a failure. Cowrie reconciles the two.
 
 ## Licence
 

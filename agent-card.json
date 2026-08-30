@@ -2,10 +2,18 @@
   "name": "Cowrie",
   "description": "Foreign exchange quotes and swap execution across 20 currencies on Celo, built for autonomous agents. Answers which pairs are tradable right now, prices them via Mento, and returns transactions that pay their own gas in stablecoin so an agent holding no CELO can still settle.",
   "version": "0.1.0",
-  "url": "https://github.com/olanrewajuakeem/cowrie",
+  "url": "https://cowrie-seven.vercel.app",
+  "documentationUrl": "https://github.com/olanrewajuakeem/cowrie",
   "provider": {
     "organization": "Cowrie",
     "url": "https://github.com/olanrewajuakeem/cowrie"
+  },
+  "endpoints": {
+    "self_description": "https://cowrie-seven.vercel.app/",
+    "currencies": "https://cowrie-seven.vercel.app/currencies",
+    "pairs": "https://cowrie-seven.vercel.app/pairs",
+    "status": "https://cowrie-seven.vercel.app/status",
+    "quote": "https://cowrie-seven.vercel.app/quote?from=USD&to=NGN&amount=100"
   },
   "capabilities": {
     "streaming": false,
