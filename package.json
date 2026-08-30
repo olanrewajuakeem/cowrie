@@ -1,0 +1,33 @@
+{
+  "name": "cowrie",
+  "version": "0.1.0",
+  "description": "An FX execution API for autonomous agents, priced on Celo via Mento. No signup, pay-per-call over x402.",
+  "type": "module",
+  "scripts": {
+    "probe": "tsx src/probe.ts",
+    "probe:pools": "tsx src/probe-pools.ts",
+    "probe:fpmm": "tsx src/probe-fpmm.ts",
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "test": "echo \"no tests yet\" && exit 0"
+  },
+  "keywords": [
+    "celo",
+    "mento",
+    "x402",
+    "erc-8004",
+    "agents",
+    "stablecoin",
+    "fx"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@mento-protocol/mento-sdk": "^3.4.0",
+    "viem": "^2.56.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
+  }
+}

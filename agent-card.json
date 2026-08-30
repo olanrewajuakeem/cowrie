@@ -1,0 +1,60 @@
+{
+  "name": "Cowrie",
+  "description": "Foreign exchange quotes and swap execution across 20 currencies on Celo, built for autonomous agents. Answers which pairs are tradable right now, prices them via Mento, and returns transactions that pay their own gas in stablecoin so an agent holding no CELO can still settle.",
+  "version": "0.1.0",
+  "url": "https://github.com/olanrewajuakeem/cowrie",
+  "provider": {
+    "organization": "Cowrie",
+    "url": "https://github.com/olanrewajuakeem/cowrie"
+  },
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false
+  },
+  "defaultInputModes": ["application/json"],
+  "defaultOutputModes": ["application/json"],
+  "chain": {
+    "name": "Celo",
+    "chainId": 42220
+  },
+  "payment": {
+    "protocol": "x402",
+    "network": "celo",
+    "asset": "USDT",
+    "description": "Pay-per-call in stablecoin. No account, no API key, no human onboarding."
+  },
+  "skills": [
+    {
+      "id": "quote",
+      "name": "FX quote",
+      "description": "Price an amount from one currency into another using live Mento liquidity, including route cost and market state.",
+      "tags": ["fx", "exchange-rate", "stablecoin", "celo", "mento"],
+      "examples": [
+        "What is 100 USD worth in NGN right now?",
+        "Quote 50000 NGN into KES.",
+        "GET /quote?from=USD&to=NGN&amount=100"
+      ]
+    },
+    {
+      "id": "availability",
+      "name": "Pair availability",
+      "description": "Report which currency pairs can be priced at this moment and which are waiting on FX market hours, with the exact reopen time. Dollar-denominated pairs cross no exchange rate and trade continuously; everything else follows the interbank week.",
+      "tags": ["market-hours", "availability", "fx"],
+      "examples": [
+        "Can I convert USD to NGN right now?",
+        "Which pairs are tradable at this hour?",
+        "GET /pairs"
+      ]
+    },
+    {
+      "id": "swap",
+      "name": "Build swap transaction",
+      "description": "Return an unsigned Celo transaction that swaps one currency into another, with feeCurrency preset so gas is paid in stablecoin rather than CELO.",
+      "tags": ["swap", "fee-abstraction", "celo", "transaction"],
+      "examples": [
+        "Build me a transaction swapping 100 USDT into NGN.",
+        "POST /swap"
+      ]
+    }
+  ]
+}
