@@ -135,6 +135,51 @@ export async function loadCurrencies(rpcUrl?: string): Promise<Map<string, Curre
   return map
 }
 
+let routePairs: Set<string> | null = null
+
+/**
+ * Every pair Mento can actually route, as a set of "ISO/ISO" keys.
+ *
+ * Without this we advertise combinations that can never work. CELO is the
+ * clearest case: it is a collateral asset and appears in the token list, but
+ * has no pool against any Mento stablecoin, so every CELO quote fails with
+ * "no route found". Listing it as supported is an unverifiable claim.
+ *
+ * Derived from the protocol rather than hardcoded, so it stays correct as
+ * Mento adds and removes pools.
+ */
+export async function loadRoutablePairs(rpcUrl?: string): Promise<Set<string>> {
+  if (routePairs) return routePairs
+
+  const mento = await getMento(rpcUrl)
+  const currencies = await loadCurrencies(rpcUrl)
+  const pairs = new Set<string>()
+
+  try {
+    const routes: readonly any[] = await mento.routes.getRoutes()
+    for (const route of routes) {
+      const isos = (route?.tokens ?? [])
+        .map((t: any) => resolve(currencies, String(t.symbol))?.iso)
+        .filter(Boolean) as string[]
+      // A route's endpoints are its first and last tokens; anything between
+      // them is an intermediate hop, not a pair we can offer directly.
+      if (isos.length >= 2) {
+        const a = isos[0]
+        const b = isos[isos.length - 1]
+        pairs.add(`${a}/${b}`)
+        pairs.add(`${b}/${a}`)
+      }
+    }
+  } catch {
+    // If route discovery fails, an empty set would wrongly report everything
+    // as untradable. Leave it null so the next request retries.
+    return new Set()
+  }
+
+  routePairs = pairs
+  return pairs
+}
+
 /** Resolve "ngn", "NGN", "NGNm" — all to the same currency. */
 export function resolve(map: Map<string, Currency>, input: string): Currency | null {
   return map.get(input.trim().toUpperCase()) ?? null

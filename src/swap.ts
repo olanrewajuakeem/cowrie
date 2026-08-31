@@ -24,7 +24,7 @@ import { encodeFunctionData, parseAbi, parseUnits, formatUnits } from 'viem'
 import { toDataSuffix } from '@celo/attribution-tags'
 import { createRequire } from 'node:module'
 import { getMento, loadCurrencies, resolve } from './tokens.js'
-import { marketState } from './market.js'
+import { isMarketOpen } from './market.js'
 import { classifyError, type FxError } from './fx.js'
 
 const require = createRequire(import.meta.url)
@@ -250,9 +250,11 @@ export async function buildSwap(
           `feeCurrency is set to the USD₮ adapter, so gas is paid in stablecoin — you do not need any CELO.`,
           `min_amount_out reflects 0.5% slippage tolerance. The swap reverts rather than filling worse than that.`,
           `Valid until unix ${built.deadline}; after that the transaction reverts and you must request a new plan.`,
-          ...(marketState(now).open
+          // Reaching this point means Mento priced the pair, so the market is
+          // trading for it — whatever a calendar might say.
+          ...(isMarketOpen(now)
             ? []
-            : ['FX markets are currently closed. This pair priced anyway because it crosses no exchange rate.']),
+            : ['Global FX markets are outside normal hours, but this pair priced anyway because it crosses no exchange rate.']),
         ],
       },
     }

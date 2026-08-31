@@ -7,10 +7,10 @@
  * that drift apart.
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { getQuote } from './fx.js'
+import { getQuote, detectMarketOpen } from './fx.js'
 import { buildSwap } from './swap.js'
-import { loadCurrencies, listCurrencies } from './tokens.js'
-import { marketState, isMarketOpen } from './market.js'
+import { loadCurrencies, listCurrencies, loadRoutablePairs } from './tokens.js'
+import { marketState } from './market.js'
 import { allCached, cacheBackend } from './cache.js'
 
 const RPC_URL = process.env.CELO_RPC_URL // optional; falls back to public RPC
@@ -99,38 +99,60 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
     if (path === '/') return json(res, 200, serviceDescription())
 
     if (path === '/status') {
+      const open = await detectMarketOpen(RPC_URL)
       return json(res, 200, {
         ok: true,
-        market: marketState(),
+        market: marketState(new Date(), open),
         chain: { name: 'Celo', chain_id: 42220 },
         cache: cacheBackend(),
-        note: 'Market hours are the standard interbank week and do not account for banking holidays.',
+        note: 'Market state is observed by asking Mento to price a major pair, not inferred from a calendar. Reopen timestamps remain schedule-based estimates.',
       })
     }
 
     if (path === '/currencies') {
       const map = await loadCurrencies(RPC_URL)
-      const currencies = listCurrencies(map).map((c) => ({
-        iso: c.iso,
-        symbol: c.symbol,
-        name: c.name,
-        address: c.address,
-        decimals: c.decimals,
-        always_on: ALWAYS_ON.has(c.iso),
-      }))
-      return json(res, 200, { count: currencies.length, currencies })
+      const routable = await loadRoutablePairs(RPC_URL)
+      const all = listCurrencies(map)
+
+      const currencies = all.map((c) => {
+        // Tradable only if it can route to at least one other currency.
+        const tradable = all.some((o) => o.iso !== c.iso && routable.has(`${c.iso}/${o.iso}`))
+        return {
+          iso: c.iso,
+          symbol: c.symbol,
+          name: c.name,
+          address: c.address,
+          decimals: c.decimals,
+          tradable,
+          always_on: ALWAYS_ON.has(c.iso),
+          ...(tradable ? {} : { note: 'Listed on Celo but has no Mento pool, so it cannot be quoted or swapped.' }),
+        }
+      })
+
+      const tradableCount = currencies.filter((c) => c.tradable).length
+      return json(res, 200, {
+        count: currencies.length,
+        tradable: tradableCount,
+        untradable: currencies.length - tradableCount,
+        currencies,
+      })
     }
 
     if (path === '/pairs') {
       const map = await loadCurrencies(RPC_URL)
       const currencies = listCurrencies(map)
-      const open = isMarketOpen()
+      const open = await detectMarketOpen(RPC_URL)
       const cached = new Map((await allCached()).map((c) => [`${c.from}/${c.to}`, c]))
+
+      const routable = await loadRoutablePairs(RPC_URL)
 
       const pairs = []
       for (const a of currencies) {
         for (const b of currencies) {
           if (a.iso === b.iso) continue
+          // Only list pairs Mento can actually route. Advertising a pair with
+          // no pool behind it is a promise we cannot keep.
+          if (!routable.has(`${a.iso}/${b.iso}`)) continue
           // A pair avoids the FX oracle only if BOTH sides are dollar claims.
           const alwaysOn = ALWAYS_ON.has(a.iso) && ALWAYS_ON.has(b.iso)
           const last = cached.get(`${a.iso}/${b.iso}`)
@@ -145,11 +167,11 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
 
       const quotable = pairs.filter((p) => p.quotable_now).length
       return json(res, 200, {
-        market: marketState(),
+        market: marketState(new Date(), open),
         total_pairs: pairs.length,
         quotable_now: quotable,
         waiting_on_market: pairs.length - quotable,
-        note: 'Pairs between dollar-denominated tokens need no FX oracle, so they trade continuously. Every other pair follows interbank market hours.',
+        note: 'Only pairs with a real Mento route are listed. Pairs between dollar-denominated tokens need no FX oracle and trade continuously; every other pair follows interbank market hours.',
         pairs,
       })
     }

@@ -113,6 +113,48 @@ export async function classifyError(
   return { code: 'upstream_error', message: 'Mento could not price this pair.', detail: first }
 }
 
+let marketProbe: { at: number; open: boolean } | null = null
+const MARKET_PROBE_TTL_MS = 60_000
+
+/**
+ * Ask Mento whether FX is actually trading, rather than trusting a calendar.
+ *
+ * We originally derived market state from the standard interbank week
+ * (Sunday 21:00 to Friday 21:00 UTC) and it was wrong: on a Sunday evening our
+ * clock said open while Mento still answered "FX market is currently closed"
+ * for every pair. Publishing that meant telling agents 342 pairs were quotable
+ * when none were.
+ *
+ * Mento is the authority on what Mento will price, so we quote a single major
+ * pair and read the answer. Cached for a minute — this runs on the /status and
+ * /pairs paths and does not need to be exact to the second.
+ */
+export async function detectMarketOpen(rpcUrl?: string): Promise<boolean> {
+  if (marketProbe && Date.now() - marketProbe.at < MARKET_PROBE_TTL_MS) {
+    return marketProbe.open
+  }
+
+  let open = false
+  try {
+    const currencies = await loadCurrencies(rpcUrl)
+    const usd = resolve(currencies, 'USD')
+    const eur = resolve(currencies, 'EUR')
+    if (!usd || !eur) return isMarketOpen() // fall back to the calendar
+
+    const mento = await getMento(rpcUrl)
+    await mento.quotes.getAmountOut(usd.address, eur.address, parseUnits('1', 18))
+    open = true
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    // Either message means the oracles are not pricing FX right now.
+    const closed = /FX market is currently closed/i.test(msg) || /no valid median/i.test(msg)
+    open = !closed
+  }
+
+  marketProbe = { at: Date.now(), open }
+  return open
+}
+
 /** Price `amount` of `from` into `to`. Never throws — failures come back typed. */
 export async function getQuote(
   fromInput: string,
@@ -208,7 +250,9 @@ export async function getQuote(
         cost_percent: costPercent,
         route,
         as_of: now.toISOString(),
-        market: marketState(now),
+        // A successful quote is itself proof the market is trading — no need
+        // to probe, and reporting "schedule" here would contradict /status.
+        market: marketState(now, true),
       },
     }
   } catch (err) {

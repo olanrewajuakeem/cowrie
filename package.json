@@ -27,10 +27,15 @@
   "dependencies": {
     "@celo/attribution-tags": "^0.3.0",
     "@mento-protocol/mento-sdk": "^3.4.0",
+    "@x402/core": "^2.24.0",
+    "@x402/evm": "^2.24.0",
+    "@x402/express": "^2.24.0",
+    "express": "^5.2.1",
     "tsx": "^4.23.12",
     "viem": "^2.56.0"
   },
   "devDependencies": {
+    "@types/express": "^5.0.6",
     "@types/node": "^26.4.0",
     "typescript": "~5.9.3"
   },
