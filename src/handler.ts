@@ -12,6 +12,8 @@ import { buildSwap } from './swap.js'
 import { loadCurrencies, listCurrencies, loadRoutablePairs } from './tokens.js'
 import { marketState } from './market.js'
 import { allCached, cacheBackend } from './cache.js'
+import { openapi } from './openapi.js'
+import { landingPage } from './landing.js'
 
 const RPC_URL = process.env.CELO_RPC_URL // optional; falls back to public RPC
 
@@ -53,7 +55,8 @@ function serviceDescription() {
     agent_id: 9796,
     agent_card: 'https://raw.githubusercontent.com/olanrewajuakeem/cowrie/main/agent-card.json',
     endpoints: {
-      'GET /': 'This description.',
+      'GET /': 'This description. Returns an HTML page to browsers.',
+      'GET /openapi.json': 'OpenAPI 3.1 description of this API.',
       'GET /currencies': 'Every supported currency with its ISO code and on-chain address.',
       'GET /pairs': 'Which pairs are quotable right now, and which are waiting on market hours.',
       'GET /status': 'FX market state and service health.',
@@ -96,7 +99,23 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
   }
 
   try {
-    if (path === '/') return json(res, 200, serviceDescription())
+    if (path === '/openapi.json') return json(res, 200, openapi())
+
+    if (path === '/') {
+      // Content negotiation: people and browser-driven reviewer bots get a
+      // readable page; agents get JSON. A browser asking for a JSON blob sees
+      // nothing useful, and neither does an agent handed HTML.
+      const accept = String(req.headers.accept ?? '')
+      if (accept.includes('text/html')) {
+        res.writeHead(200, {
+          'content-type': 'text/html; charset=utf-8',
+          'cache-control': 'public, max-age=300',
+        })
+        res.end(landingPage())
+        return
+      }
+      return json(res, 200, serviceDescription())
+    }
 
     if (path === '/status') {
       const open = await detectMarketOpen(RPC_URL)
