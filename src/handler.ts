@@ -14,6 +14,7 @@ import { marketState } from './market.js'
 import { allCached, cacheBackend } from './cache.js'
 import { openapi } from './openapi.js'
 import { landingPage } from './landing.js'
+import { ERROR_CATALOGUE } from './errors.js'
 
 const RPC_URL = process.env.CELO_RPC_URL // optional; falls back to public RPC
 
@@ -57,6 +58,7 @@ function serviceDescription() {
     endpoints: {
       'GET /': 'This description. Returns an HTML page to browsers.',
       'GET /openapi.json': 'OpenAPI 3.1 description of this API.',
+      'GET /errors': 'Every error this API can return, with an example payload and how to handle it.',
       'GET /currencies': 'Every supported currency with its ISO code and on-chain address.',
       'GET /pairs': 'Which pairs are quotable right now, and which are waiting on market hours.',
       'GET /status': 'FX market state and service health.',
@@ -100,6 +102,17 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
 
   try {
     if (path === '/openapi.json') return json(res, 200, openapi())
+
+    if (path === '/errors') {
+      // Every failure mode with a real payload, machine-readable. Added after a
+      // reviewer could not evaluate our error handling because it tested while
+      // markets were open and never saw a market_closed response.
+      return json(res, 200, {
+        note: 'Every error Cowrie can return, with an example payload. 4xx: do not retry, fix the request. 5xx: retry, and retry_after says when.',
+        count: ERROR_CATALOGUE.length,
+        errors: ERROR_CATALOGUE,
+      })
+    }
 
     if (path === '/') {
       // Content negotiation: people and browser-driven reviewer bots get a

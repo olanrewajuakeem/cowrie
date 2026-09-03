@@ -95,7 +95,59 @@ export interface SwapPlan {
   recipient: string
   transactions: UnsignedTx[]
   attribution_tag: string
+  /**
+   * How to get from these unsigned transactions to a settled conversion.
+   *
+   * Added after a reviewer pointed out that returning calldata and stopping
+   * leaves an agent "stuck holding raw transaction data with no ability to
+   * sign or submit". Cowrie deliberately never holds keys, so submission is
+   * the caller's job — but saying so, and showing how, is ours.
+   */
+  next_steps: {
+    summary: string
+    steps: string[]
+    example: string
+    reference_implementation: string
+  }
   notes: string[]
+}
+
+/** Worked submission example, returned inline so an agent never has to leave the payload. */
+function nextSteps(txCount: number) {
+  return {
+    summary:
+      'These transactions are unsigned. Sign each one with the recipient key and broadcast it yourself — Cowrie never holds keys and cannot submit on your behalf.',
+    steps: [
+      `Send the ${txCount} transaction(s) in the order given.`,
+      'Copy to, data, value, feeCurrency, maxFeePerGas and maxPriorityFeePerGas from each transaction verbatim.',
+      'Do NOT let your library estimate gas. When gas is paid in an ERC-20, Celo denominates the base fee in that token; viem and ethers estimate against CELO and produce a cap the node rejects with "max fee per gas less than block base fee". The values above are already denominated correctly.',
+      'Wait for each transaction to confirm before sending the next. An approval that has not landed makes the swap revert.',
+      `Confirm before the deadline. After it, the swap reverts and you must request a new plan.`,
+      'Optionally verify attribution with verifyTx from @celo/attribution-tags against the mined transaction.',
+    ],
+    example: [
+      "import { createWalletClient, http } from 'viem'",
+      "import { privateKeyToAccount } from 'viem/accounts'",
+      "import { celo } from 'viem/chains'",
+      '',
+      'const account = privateKeyToAccount(PRIVATE_KEY)',
+      'const wallet = createWalletClient({ account, chain: celo, transport: http() })',
+      '',
+      'for (const tx of plan.transactions) {',
+      '  const hash = await wallet.sendTransaction({',
+      '    to: tx.to,',
+      '    data: tx.data,',
+      '    value: BigInt(tx.value),',
+      '    feeCurrency: tx.feeCurrency,',
+      '    maxFeePerGas: BigInt(tx.maxFeePerGas),',
+      '    maxPriorityFeePerGas: BigInt(tx.maxPriorityFeePerGas),',
+      '  })',
+      '  await publicClient.waitForTransactionReceipt({ hash })',
+      '}',
+    ].join('\n'),
+    reference_implementation:
+      'https://github.com/olanrewajuakeem/cowrie/blob/main/src/execute-swap.ts',
+  }
 }
 
 export type SwapResult = { ok: true; plan: SwapPlan } | { ok: false; error: FxError }
@@ -244,6 +296,7 @@ export async function buildSwap(
         recipient,
         transactions,
         attribution_tag: ATTRIBUTION_TAG,
+        next_steps: nextSteps(transactions.length),
         notes: [
           'These transactions are unsigned. Cowrie never takes custody of funds and never asks for a key.',
           'Send them in order and wait for each to confirm before sending the next.',
