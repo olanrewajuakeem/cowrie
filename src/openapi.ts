@@ -9,6 +9,7 @@
  * views of it.
  */
 import { ERROR_CATALOGUE, type ErrorDoc } from './errors.js'
+import { VERSION } from './version.js'
 
 const BASE = process.env.PUBLIC_URL ?? 'https://cowrie-seven.vercel.app'
 
@@ -46,7 +47,7 @@ export function openapi() {
     openapi: '3.1.0',
     info: {
       title: 'Cowrie',
-      version: '0.2.0',
+      version: VERSION,
       summary: 'Foreign exchange rates and swap execution for autonomous agents on Celo.',
       description: [
         'Cowrie prices currency conversions using the Mento protocol on Celo mainnet and',

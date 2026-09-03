@@ -142,6 +142,17 @@ export const ERROR_CATALOGUE: ErrorDoc[] = [
     },
   },
   {
+    code: 'facilitator_timeout',
+    status: 502,
+    retry: 'short',
+    when: 'The x402 payment middleware could not reach Celo\'s facilitator at api.x402.celo.org within 30 seconds. Raised by the payment layer before Cowrie\'s own code runs, so the shape differs from the errors above.',
+    handling:
+      'Safe to retry — no payment was signed or settled, and nothing was charged. Wait a few seconds. If it persists, the facilitator is degraded; /quote and every other read endpoint are unaffected and remain free.',
+    example: {
+      error: 'Facilitator supported request timed out after 30000ms',
+    },
+  },
+  {
     code: 'not_found',
     status: 404,
     retry: 'never',

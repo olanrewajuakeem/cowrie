@@ -9,7 +9,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { getQuote, detectMarketOpen } from './fx.js'
 import { buildSwap } from './swap.js'
-import { loadCurrencies, listCurrencies, loadRoutablePairs } from './tokens.js'
+import { loadCurrencies, listCurrencies, loadRoutablePairs, registryDegraded } from './tokens.js'
+import { VERSION, SWAP_PRICE_USD } from './version.js'
 import { marketState } from './market.js'
 import { allCached, cacheBackend } from './cache.js'
 import { openapi } from './openapi.js'
@@ -51,7 +52,14 @@ function serviceDescription() {
     name: 'Cowrie',
     description:
       'Foreign exchange rates for autonomous agents, priced on Celo via the Mento protocol.',
-    version: '0.1.0',
+    version: VERSION,
+    // Disclosed here, not only at the 402. A reviewer found payment "a
+    // late-stage surprise… no earlier endpoint discloses that settlement
+    // requires payment", which is a poor thing to learn mid-flow.
+    pricing: {
+      reads: 'free — /, /currencies, /pairs, /status, /quote, /errors, /openapi.json',
+      'POST /swap': `${SWAP_PRICE_USD} USD per call, paid over x402 in USDC or USD₮ on Celo. No account or API key; the 402 response carries the payment options.`,
+    },
     chain: { name: 'Celo', chain_id: 42220 },
     agent_id: 9796,
     agent_card: 'https://raw.githubusercontent.com/olanrewajuakeem/cowrie/main/agent-card.json',
@@ -73,6 +81,31 @@ function serviceDescription() {
       'Dollar-denominated pairs (USD, USDC, USDT, axlUSDC) cross no exchange rate and are quotable at any hour.',
     ],
   }
+}
+
+/**
+ * Counts read from the same sources the endpoints use.
+ *
+ * Never hardcode anything countable: the landing page and the API disagreed
+ * for two days because the page said 19 and 342 while collateral assets were
+ * silently failing to load, and the API served 15 and 210.
+ */
+async function liveStats() {
+  const map = await loadCurrencies(RPC_URL)
+  const routable = await loadRoutablePairs(RPC_URL)
+  const all = listCurrencies(map)
+  const tradable = all.filter((c) =>
+    all.some((o) => o.iso !== c.iso && routable.has(`${c.iso}/${o.iso}`))
+  ).length
+
+  let pairs = 0
+  for (const a of all) {
+    for (const b of all) {
+      if (a.iso !== b.iso && routable.has(`${a.iso}/${b.iso}`)) pairs++
+    }
+  }
+
+  return { currencies: all.length, tradable, pairs, degraded: registryDegraded() }
 }
 
 /** Read and parse a JSON request body. Returns null if it is not valid JSON. */
@@ -120,11 +153,14 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
       // nothing useful, and neither does an agent handed HTML.
       const accept = String(req.headers.accept ?? '')
       if (accept.includes('text/html')) {
+        // Read the counts live rather than hardcoding them. The page used to
+        // claim 19 currencies and 342 pairs while the API served 15 and 210.
+        const stats = await liveStats()
         res.writeHead(200, {
           'content-type': 'text/html; charset=utf-8',
-          'cache-control': 'public, max-age=300',
+          'cache-control': 'no-store',
         })
-        res.end(landingPage())
+        res.end(landingPage(stats))
         return
       }
       return json(res, 200, serviceDescription())
@@ -134,9 +170,13 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
       const open = await detectMarketOpen(RPC_URL)
       return json(res, 200, {
         ok: true,
+        version: VERSION,
         market: marketState(new Date(), open),
         chain: { name: 'Celo', chain_id: 42220 },
         cache: cacheBackend(),
+        // Non-null when the currency registry fell back to hardcoded
+        // collateral addresses. Visible rather than silent.
+        degraded: registryDegraded(),
         note: 'Market state is observed by asking Mento to price a major pair, not inferred from a calendar. Reopen timestamps remain schedule-based estimates.',
       })
     }

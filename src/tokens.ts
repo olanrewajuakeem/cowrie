@@ -84,6 +84,34 @@ export interface Currency {
   decimals: number
 }
 
+/**
+ * Verified collateral assets, used only when the SDK returns none.
+ *
+ * `tokens.getCollateralAssets()` resolves with an empty array in production
+ * rather than throwing, which silently dropped USDC, USDT, axlUSDC, axlEUROC
+ * and CELO from the registry: /currencies reported 15 instead of 20, /pairs
+ * 210 instead of 342, and `USD -> USDC` — the one pair that works at weekends —
+ * returned 400. A reviewer caught the mismatch against our own homepage.
+ *
+ * These addresses were read from the protocol itself and verified on mainnet.
+ * They are a fallback, never the primary source, and `registryDegraded()`
+ * reports when they were needed so the failure is visible rather than silent.
+ */
+const COLLATERAL_FALLBACK = [
+  { address: '0x471EcE3750Da237f93B8E339c536989b8978a438', symbol: 'CELO', name: 'Celo native asset', decimals: 18 },
+  { address: '0xcebA9300f2b948710d2653dD7B07f33A8B32118C', symbol: 'USDC', name: 'USDC', decimals: 6 },
+  { address: '0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e', symbol: 'USD₮', name: 'Tether USD', decimals: 6 },
+  { address: '0xEB466342C4d449BC9f53A865D5Cb90586f405215', symbol: 'axlUSDC', name: 'Axelar Wrapped USDC', decimals: 6 },
+  { address: '0x061cc5a2C863E0C1Cb404006D559dB18A34C762d', symbol: 'axlEUROC', name: 'Axelar Wrapped EUROC', decimals: 6 },
+]
+
+let degraded: string | null = null
+
+/** Non-null when the registry was built with fallback data. Surfaced on /status. */
+export function registryDegraded(): string | null {
+  return degraded
+}
+
 let registry: Map<string, Currency> | null = null
 let mentoClient: MentoClass | null = null
 let publicClient: PublicClient | null = null
@@ -154,10 +182,21 @@ export async function loadCurrencies(rpcUrl?: string): Promise<Map<string, Curre
 
   // Collateral assets are a separate call from stable tokens, and omitting them
   // silently drops USDC/USDT — the only pairs that quote outside market hours.
-  const [stables, collateral] = await Promise.all([
+  const [stables, collateralResult] = await Promise.all([
     mento.tokens.getStableTokens(),
-    mento.tokens.getCollateralAssets(),
+    mento.tokens.getCollateralAssets().catch(() => []),
   ])
+
+  // The SDK returns an empty array here in production rather than throwing.
+  // Falling back keeps USDC/USDT quotable — they are the only pairs that work
+  // while FX markets are shut — and records that it happened.
+  let collateral = collateralResult as any[]
+  if (!collateral || collateral.length === 0) {
+    collateral = COLLATERAL_FALLBACK
+    degraded = 'Collateral assets came back empty from the Mento SDK; using a verified fallback list. Stable tokens are unaffected.'
+  } else {
+    degraded = null
+  }
 
   const map = new Map<string, Currency>()
 

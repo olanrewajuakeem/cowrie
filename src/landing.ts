@@ -15,8 +15,25 @@
  * cannot disagree.
  */
 import { ERROR_CATALOGUE, RETRY_LABEL } from './errors.js'
+import { VERSION, SWAP_PRICE_USD } from './version.js'
 
 const BASE = process.env.PUBLIC_URL ?? 'https://cowrie-seven.vercel.app'
+
+/**
+ * Live counts, passed in by the handler.
+ *
+ * These used to be hardcoded as "19 currencies, 342 pairs" while the live
+ * endpoints returned 15 and 210, because collateral assets were silently
+ * failing to load. A reviewer caught the contradiction and reasonably
+ * concluded the documentation could not be trusted. Nothing countable is
+ * written by hand on this page any more.
+ */
+export interface LiveStats {
+  currencies: number
+  tradable: number
+  pairs: number
+  degraded: string | null
+}
 
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -39,7 +56,7 @@ function errorSection(): string {
   ).join('')
 }
 
-export function landingPage(): string {
+export function landingPage(stats: LiveStats): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -113,12 +130,22 @@ export function landingPage(): string {
   <p class="lede">Foreign exchange for autonomous agents, on Celo.</p>
 
   <div class="facts">
-    <span class="fact"><b>19</b> tradable currencies</span>
-    <span class="fact"><b>342</b> routed pairs</span>
+    <span class="fact"><b>${stats.tradable}</b> tradable currencies</span>
+    <span class="fact"><b>${stats.pairs}</b> routed pairs</span>
     <span class="fact">ERC-8004 <b>#9796</b></span>
-    <span class="fact"><b>$0.001</b> per swap, x402</span>
+    <span class="fact"><b>$${SWAP_PRICE_USD}</b> per swap, x402</span>
     <span class="fact"><b>0</b> CELO needed</span>
+    <span class="fact">v<b>${VERSION}</b></span>
   </div>
+  <p style="font-size:.82rem;color:var(--dim);margin:-1.25rem 0 1.5rem">
+    Counts above are read live from
+    <a href="/currencies">/currencies</a> and <a href="/pairs">/pairs</a> on each
+    request, not written by hand.${
+      stats.degraded
+        ? ` <b style="color:var(--warn)">Degraded:</b> ${esc(stats.degraded)}`
+        : ''
+    }
+  </p>
 
   <p>An agent holding stablecoins cannot open a bank account, verify an email, or click
   through an API signup. Every existing FX API assumes a human did that first. Cowrie
@@ -183,10 +210,10 @@ export function landingPage(): string {
   </table>
   <table>
     <tr><th>Response field</th><th>Type</th><th>Meaning</th></tr>
-    <tr><td><code>amount_out</code></td><td>string</td><td>Expected output, full precision. A string, not a number — do not parse as a float without care.</td></tr>
-    <tr><td><code>rate</code></td><td>number</td><td>Units of <code>to</code> per one unit of <code>from</code>.</td></tr>
-    <tr><td><code>inverse_rate</code></td><td>number</td><td>The reciprocal, for convenience.</td></tr>
-    <tr><td><code>cost_percent</code></td><td>number | null</td><td>Total route cost. ~0.02% for AMM pools, ~1% for oracle-priced pairs.</td></tr>
+    <tr><td><code>amount_out</code></td><td>string</td><td>Expected output at full token precision (18 decimals for Mento stablecoins, 6 for USDC/USD₮). <b>A decimal string, deliberately.</b> IEEE-754 cannot hold these exactly, so parsing as a float loses precision. Use it as a string, or parse with a decimal library.</td></tr>
+    <tr><td><code>rate</code></td><td>number</td><td>Units of <code>to</code> per one unit of <code>from</code>. A JSON number, for convenience and display — <b>derived from <code>amount_out</code>, which is authoritative.</b> Do not compute settlement amounts from this.</td></tr>
+    <tr><td><code>inverse_rate</code></td><td>number</td><td>The reciprocal of <code>rate</code>, same caveat.</td></tr>
+    <tr><td><code>cost_percent</code></td><td>number | null</td><td><b>Percent, not basis points.</b> <code>1</code> means 1%. The total one-way protocol fee across every hop of the route, as reported by Mento. It is already reflected in <code>amount_out</code> — do not subtract it again. It excludes gas and excludes any price movement between quote and execution. Typically ~0.02% for AMM pools and ~1% for oracle-priced pairs.</td></tr>
     <tr><td><code>route</code></td><td>string[]</td><td>Path taken, ordered from source to target.</td></tr>
     <tr><td><code>as_of</code></td><td>string</td><td>ISO 8601 timestamp of the quote.</td></tr>
     <tr><td><code>market.open</code></td><td>boolean</td><td>Whether FX is trading.</td></tr>
