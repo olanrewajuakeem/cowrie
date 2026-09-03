@@ -64,6 +64,18 @@ export function landingPage(stats: LiveStats): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cowrie — FX for agents on Celo</title>
 <meta name="description" content="Foreign exchange rates and swap execution for autonomous agents, priced on Celo via Mento. No signup, pay per call over x402.">
+<link rel="canonical" href="${BASE}/">
+<!-- Open Graph and Twitter cards. A reviewer flagged missing metadata "for
+     link sharing" — without these, pasting the URL anywhere shows a bare link. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Cowrie">
+<meta property="og:title" content="Cowrie — FX for agents on Celo">
+<meta property="og:description" content="Exchange rates and swap execution for AI agents. No signup, no CELO needed — gas is paid in stablecoin. $0.001 per swap over x402.">
+<meta property="og:url" content="${BASE}/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Cowrie — FX for agents on Celo">
+<meta name="twitter:description" content="Exchange rates and swap execution for AI agents. No signup, no CELO needed — gas is paid in stablecoin.">
+<meta name="theme-color" content="#8b5e34">
 <style>
   :root {
     color-scheme: light dark;
