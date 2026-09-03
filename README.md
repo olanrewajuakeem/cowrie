@@ -128,6 +128,12 @@ Three things we hit that are worth recording:
 
 **`isPairTradable` disagrees with `getAmountOut`.** Mento reported `USDm/NGNm` as tradable while the quote reverted with `no valid median`. Any agent trusting that flag walks straight into a failure. Cowrie reconciles the two.
 
+**`getCollateralAssets()` resolves empty in production but not locally.** Same SDK version, same chain, same code — on Vercel it returns `[]` rather than throwing, silently dropping USDC, USDT, axlUSDC, axlEUROC and CELO from the registry. The visible effect was that `/currencies` served 15 instead of 20, `/pairs` 210 instead of 342, and `USD → USDC` — the one pair that works while FX markets are shut — returned `400 unsupported_currency`. Nothing errored; the API just quietly knew about fewer currencies than its own documentation claimed.
+
+An AskBots reviewer found it by comparing the homepage against the live endpoints, which is a better test than any we were running. Cowrie now falls back to a verified collateral list, reports `degraded` on [`/status`](https://cowrie-seven.vercel.app/status) when it does, and reads every count on the landing page live rather than hardcoding it — so the page and the API cannot disagree again.
+
+**A silent empty result is worse than an exception.** All three of these SDK faults were found by observing behaviour rather than reading code, and this one only surfaced in an environment we could not reproduce locally.
+
 ## Licence
 
 MIT

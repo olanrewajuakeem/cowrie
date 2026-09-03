@@ -195,6 +195,7 @@ export function landingPage(stats: LiveStats): string {
     <tr><td><a href="/currencies">GET /currencies</a></td><td>Currencies, addresses, tradability</td><td class="free">free</td></tr>
     <tr><td><a href="/pairs">GET /pairs</a></td><td>Which pairs are quotable right now</td><td class="free">free</td></tr>
     <tr><td><a href="/errors">GET /errors</a></td><td>Every error, machine-readable</td><td class="free">free</td></tr>
+    <tr><td><a href="/proof">GET /proof</a></td><td>Mined transactions this API produced</td><td class="free">free</td></tr>
     <tr><td><a href="/quote?from=USD&amp;to=NGN&amp;amount=100">GET /quote</a></td><td>Price a conversion</td><td class="free">free</td></tr>
     <tr><td><code>POST /swap</code></td><td>Unsigned transactions that execute a conversion</td><td>$0.001</td></tr>
   </table>
@@ -283,6 +284,26 @@ for (const tx of plan.transactions) {
   fix the request. 5xx means retry, and <code>retry_after</code> says when.</b> The same
   catalogue is available machine-readable at <a href="/errors">/errors</a>.</p>
   ${errorSection()}
+
+  <h2>Don't take our word for it</h2>
+  <p>Documentation cannot demonstrate that <code>/swap</code> returns usable
+  transactions. These were built by this endpoint, signed by an ordinary wallet, and
+  mined on Celo mainnet — check them on Celoscan rather than trusting this page.</p>
+  <table>
+    <tr><th>What</th><th>Transaction</th><th>Observed</th></tr>
+    <tr>
+      <td>Swap built by <code>POST /swap</code></td>
+      <td><a href="https://celoscan.io/tx/0x3f8e473f4067a48a5d279edc4137c9f229c04d9420a06c403756040a3f8369de"><code>0x3f8e473f…</code></a></td>
+      <td>0.3 USDT → 0.2999232 USDm. <b>0 CELO spent</b> — gas paid in USD₮. Attribution tag confirmed on-chain with <code>verifyTx</code>.</td>
+    </tr>
+    <tr>
+      <td>ERC-8004 identity mint</td>
+      <td><a href="https://celoscan.io/tx/0x624c2626113b15d09991183fba27a25af63ce1f52a1a52442dc8490994a0dc19"><code>0x624c2626…</code></a></td>
+      <td>Agent #9796, cost 0.0043 USD₮.</td>
+    </tr>
+  </table>
+  <p>Full detail, including how to verify each claim yourself, at
+  <a href="/proof">/proof</a>.</p>
 
   <h2>Honest limits</h2>
   <p>The rate cache holds only what Cowrie has itself observed — it is not a historical

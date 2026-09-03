@@ -16,6 +16,7 @@ import { allCached, cacheBackend } from './cache.js'
 import { openapi } from './openapi.js'
 import { landingPage } from './landing.js'
 import { ERROR_CATALOGUE } from './errors.js'
+import { proof } from './proof.js'
 
 const RPC_URL = process.env.CELO_RPC_URL // optional; falls back to public RPC
 
@@ -67,6 +68,7 @@ function serviceDescription() {
       'GET /': 'This description. Returns an HTML page to browsers.',
       'GET /openapi.json': 'OpenAPI 3.1 description of this API.',
       'GET /errors': 'Every error this API can return, with an example payload and how to handle it.',
+      'GET /proof': 'Mined Celo mainnet transactions built by this API, so its claims can be checked rather than trusted.',
       'GET /currencies': 'Every supported currency with its ISO code and on-chain address.',
       'GET /pairs': 'Which pairs are quotable right now, and which are waiting on market hours.',
       'GET /status': 'FX market state and service health.',
@@ -135,6 +137,13 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
 
   try {
     if (path === '/openapi.json') return json(res, 200, openapi())
+
+    if (path === '/proof') {
+      // Runtime evidence rather than assertion. Reviewers noted that
+      // documentation alone cannot show /swap produces usable transactions,
+      // and treated swap execution as unverified. These are checkable.
+      return json(res, 200, proof())
+    }
 
     if (path === '/errors') {
       // Every failure mode with a real payload, machine-readable. Added after a

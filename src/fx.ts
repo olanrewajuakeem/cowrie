@@ -23,6 +23,15 @@ export interface Quote {
   cost_percent: number | null
   route: string[]
   as_of: string
+  /**
+   * How long this quote should be treated as usable, in seconds.
+   *
+   * Requested by reviewers who wanted a mechanical staleness check rather than
+   * having to reason about `as_of` themselves. Oracle-priced pairs move with
+   * the feed; dollar-denominated pairs are far more stable. This is guidance,
+   * not a guarantee — a quote is indicative until executed.
+   */
+  max_age_seconds: number
   market: MarketState
 }
 
@@ -112,6 +121,9 @@ export async function classifyError(
 
   return { code: 'upstream_error', message: 'Mento could not price this pair.', detail: first }
 }
+
+/** Dollar-denominated tokens cross no exchange rate, so their quotes age slowly. */
+const ALWAYS_ON = new Set(['USD', 'USDC', 'USDT', 'axlUSDC'])
 
 let marketProbe: { at: number; open: boolean } | null = null
 const MARKET_PROBE_TTL_MS = 60_000
@@ -250,6 +262,9 @@ export async function getQuote(
         cost_percent: costPercent,
         route,
         as_of: now.toISOString(),
+        // Dollar-to-dollar pairs cross no exchange rate and barely move;
+        // anything touching an FX oracle can shift with each reporting round.
+        max_age_seconds: ALWAYS_ON.has(from.iso) && ALWAYS_ON.has(to.iso) ? 300 : 30,
         // A successful quote is itself proof the market is trading — no need
         // to probe, and reporting "schedule" here would contradict /status.
         market: marketState(now, true),

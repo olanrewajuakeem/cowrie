@@ -92,6 +92,33 @@ if (X402_API_KEY) {
   app.use((_req, res, next) => {
     const original = res.json.bind(res)
     res.json = (body: unknown) => {
+      // Normalise anything the payment layer emits into the documented
+      // envelope. A reviewer hit `{"error":"Facilitator supported request
+      // timed out after 30000ms"}` — a bare string with no code and no retry
+      // guidance, which breaks any agent parsing {error:{code,message}}.
+      const raw = body as { error?: unknown } | null
+      if (raw && typeof raw.error === 'string') {
+        const message = raw.error
+        const isTimeout = /timed out|timeout|ETIMEDOUT|ECONNREFUSED/i.test(message)
+        res.statusCode = isTimeout ? 502 : res.statusCode
+        if (isTimeout) res.setHeader('retry-after', '5')
+        return original({
+          error: {
+            code: isTimeout ? 'facilitator_timeout' : 'payment_layer_error',
+            message: isTimeout
+              ? "Celo's x402 facilitator did not respond in time. No payment was signed or settled, and nothing was charged."
+              : message,
+            detail: message,
+            ...(isTimeout ? { retry_after: 5 } : {}),
+            free_alternatives: {
+              '/quote': 'Rates and route costs, free and unaffected by this.',
+              '/pairs': 'Which pairs are tradable right now, free.',
+            },
+            see: '/errors',
+          },
+        })
+      }
+
       if (res.statusCode === 402 && (!body || Object.keys(body as object).length === 0)) {
         return original({
           error: {
