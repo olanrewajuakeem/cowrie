@@ -32,6 +32,14 @@ export interface Quote {
    * not a guarantee — a quote is indicative until executed.
    */
   max_age_seconds: number
+  /**
+   * ISO timestamp when this quote should be considered stale.
+   *
+   * `as_of + max_age_seconds`, computed here so an agent does not have to do
+   * date arithmetic to answer "is this still good?" — a reviewer noted having
+   * to derive it themselves.
+   */
+  expires_at: string
   market: MarketState
 }
 
@@ -86,7 +94,20 @@ export async function classifyError(
     .filter(Boolean)
     .slice(0, 2)
     .join(' ')
-  const closedByClock = !isMarketOpen(now)
+
+  /**
+   * Ask whether FX is actually trading rather than consulting the calendar.
+   *
+   * Different oracle feeds stop and resume at different times: at 23:15 UTC on
+   * a Friday, EUR was still pricing while NGN had already gone quiet. Calling
+   * that "global FX markets are closed" is wrong, and it produced a response
+   * asserting markets were open beside one saying they were shut.
+   *
+   * If a major pair still prices, the market is open and this feed
+   * specifically is unavailable — a materially different instruction for the
+   * caller: minutes, not until Sunday.
+   */
+  const closedByClock = !(await detectMarketOpen())
 
   if (/FX market is currently closed/i.test(raw) || (/no valid median/i.test(raw) && closedByClock)) {
     const opens = nextOpen(now)
@@ -109,13 +130,23 @@ export async function classifyError(
   }
 
   if (/no valid median/i.test(raw)) {
-    // Market is open but the feed has no agreed price — a real oracle problem.
-    // Short retry: these usually clear within a reporting round.
+    // Other pairs are pricing, so this is feed-specific rather than a closed
+    // market. Emerging-market feeds often go quiet before and resume after the
+    // majors, so this can also mean "closed for this pair, but not for EUR".
+    const stale = from && to ? await recall(from, to) : null
     return {
       code: 'rate_unavailable',
-      message: 'No oracle price is currently available for this pair.',
+      message: `No oracle price is currently available for ${from ?? 'this pair'}/${to ?? ''}. Other pairs are pricing, so this is specific to this feed rather than a market-wide closure.`,
       detail: first,
       retry_after: 60,
+      ...(stale
+        ? {
+            last_known: {
+              ...stale,
+              warning: 'Stale. Indicative only — not executable.',
+            },
+          }
+        : {}),
     }
   }
 
@@ -227,6 +258,17 @@ export async function getQuote(
 
     const amountOut = formatUnits(out, to.decimals)
     const rate = Number(amountOut) / numeric
+    const bothAlwaysOn = ALWAYS_ON.has(from.iso) && ALWAYS_ON.has(to.iso)
+    const maxAge = bothAlwaysOn ? 300 : 30
+
+    /**
+     * A successful quote proves FX is trading ONLY if the pair needed an
+     * oracle. USD -> USDC prices at any hour, so its success says nothing
+     * about market state — and reporting `open: true` from it produced a
+     * response that contradicted itself, claiming markets were open beside a
+     * market_closed error for naira in the same payload.
+     */
+    const marketOpen = bothAlwaysOn ? await detectMarketOpen(rpcUrl) : true
 
     // Bank every live rate we see. This is what we serve back during the
     // weekend blackout, so the cache is only ever as good as our uptime.
@@ -264,10 +306,9 @@ export async function getQuote(
         as_of: now.toISOString(),
         // Dollar-to-dollar pairs cross no exchange rate and barely move;
         // anything touching an FX oracle can shift with each reporting round.
-        max_age_seconds: ALWAYS_ON.has(from.iso) && ALWAYS_ON.has(to.iso) ? 300 : 30,
-        // A successful quote is itself proof the market is trading — no need
-        // to probe, and reporting "schedule" here would contradict /status.
-        market: marketState(now, true),
+        max_age_seconds: maxAge,
+        expires_at: new Date(now.getTime() + maxAge * 1000).toISOString(),
+        market: marketState(now, marketOpen),
       },
     }
   } catch (err) {

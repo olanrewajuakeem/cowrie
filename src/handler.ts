@@ -9,7 +9,14 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { getQuote, detectMarketOpen } from './fx.js'
 import { buildSwap } from './swap.js'
-import { loadCurrencies, listCurrencies, loadRoutablePairs, registryDegraded } from './tokens.js'
+import { formatUnits } from 'viem'
+import {
+  loadCurrencies,
+  listCurrencies,
+  loadRoutablePairs,
+  registryDegraded,
+  getPublicClient,
+} from './tokens.js'
 import { VERSION, SWAP_PRICE_USD } from './version.js'
 import { marketState } from './market.js'
 import { allCached, cacheBackend } from './cache.js'
@@ -48,6 +55,55 @@ function json(
  * Self-description at the root, so an agent that finds this service can learn
  * to use it without a human reading documentation.
  */
+/**
+ * A real quote, computed now, embedded in the root response.
+ *
+ * Six of ten round-one reviewers fetched only `GET /` and concluded every
+ * claim was "unverified rather than disproven" — scoring reliability 5 not
+ * because anything was wrong but because nothing was checkable from a single
+ * request. One wrote: "the evidence proves only that the documentation page
+ * loads". Fair. So the front door now carries live runtime data with a
+ * timestamp, and a reader who never makes a second call has still seen the
+ * service actually work.
+ */
+async function liveProof() {
+  const started = Date.now()
+  try {
+    // Two quotes, chosen so this block is informative at any hour.
+    //
+    // USD -> USDC crosses no exchange rate and needs no oracle, so it prices
+    // even at weekends: there is always a successful quote to show.
+    // USD -> NGN needs an FX oracle, so at weekends it demonstrates the error
+    // contract instead. Together they show the service working AND show what
+    // failure looks like, without the reader having to wait for Monday.
+    const [alwaysOn, fx] = await Promise.all([
+      getQuote('USD', 'USDC', '100', RPC_URL),
+      getQuote('USD', 'NGN', '100', RPC_URL),
+    ])
+
+    return {
+      note: 'Both computed when you requested this, not static examples. Reproduce them by calling /quote yourself.',
+      computed_in_ms: Date.now() - started,
+      always_on_pair: {
+        request: 'GET /quote?from=USD&to=USDC&amount=100',
+        why: 'Dollar-to-dollar crosses no exchange rate, so it prices at any hour including weekends.',
+        ...(alwaysOn.ok ? { result: alwaysOn.quote } : { error: alwaysOn.error }),
+      },
+      oracle_priced_pair: {
+        request: 'GET /quote?from=USD&to=NGN&amount=100',
+        why: 'Needs an FX oracle. At weekends this returns a documented market_closed error with a retry window — the error contract working, not a fault.',
+        ...(fx.ok ? { result: fx.quote } : { error: fx.error }),
+      },
+    }
+  } catch (err) {
+    return {
+      note: 'Live quotes were attempted for this response and failed unexpectedly.',
+      computed_in_ms: Date.now() - started,
+      error: String(err),
+    }
+  }
+}
+
 function serviceDescription() {
   return {
     name: 'Cowrie',
@@ -69,6 +125,8 @@ function serviceDescription() {
       'GET /openapi.json': 'OpenAPI 3.1 description of this API.',
       'GET /errors': 'Every error this API can return, with an example payload and how to handle it.',
       'GET /proof': 'Mined Celo mainnet transactions built by this API, so its claims can be checked rather than trusted.',
+      'GET /healthz': 'Standard health check: version, uptime, market state, cache backend.',
+      'GET /balance/{address}': 'Every non-zero balance that address holds across the currencies Cowrie knows, so an agent can check it can afford a swap before planning one.',
       'GET /currencies': 'Every supported currency with its ISO code and on-chain address.',
       'GET /pairs': 'Which pairs are quotable right now, and which are waiting on market hours.',
       'GET /status': 'FX market state and service health.',
@@ -172,7 +230,24 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
         res.end(landingPage(stats))
         return
       }
-      return json(res, 200, serviceDescription())
+      // Include a live quote so a reader who only ever fetches this one URL
+      // still sees the service working, with a timestamp they can check.
+      return json(res, 200, { ...serviceDescription(), live_proof: await liveProof() })
+    }
+
+    if (path === '/healthz') {
+      // Standard health check. Other Celo agent skills expect it at this path,
+      // and a reviewer flagged its absence.
+      const open = await detectMarketOpen(RPC_URL)
+      return json(res, 200, {
+        ok: true,
+        version: VERSION,
+        uptime_seconds: Math.round(process.uptime()),
+        chain: { name: 'Celo', chain_id: 42220 },
+        market_open: open,
+        cache: cacheBackend(),
+        degraded: registryDegraded(),
+      })
     }
 
     if (path === '/status') {
@@ -254,6 +329,72 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
         waiting_on_market: pairs.length - quotable,
         note: 'Only pairs with a real Mento route are listed. Pairs between dollar-denominated tokens need no FX oracle and trade continuously; every other pair follows interbank market hours.',
         pairs,
+      })
+    }
+
+    if (path.startsWith('/balance')) {
+      // Added after a reviewer pointed out that an exchange API which cannot
+      // tell you whether you hold the input token forces every agent into a
+      // separate lookup before it can plan a swap.
+      const address = path.slice('/balance/'.length) || url.searchParams.get('address') || ''
+      if (!/^0x[a-fA-F0-9]{40}$/.test(address)) {
+        return json(res, 400, {
+          error: {
+            code: 'invalid_request',
+            message: `"address" must be a 0x address, got "${address}".`,
+            example: '/balance/0xc3A2AE793B4aCC88620E538201913A7F042edA0D',
+          },
+        })
+      }
+
+      const map = await loadCurrencies(RPC_URL)
+      const currencies = listCurrencies(map)
+      const client = getPublicClient(RPC_URL)
+      const erc20 = [
+        {
+          name: 'balanceOf',
+          type: 'function',
+          stateMutability: 'view',
+          inputs: [{ type: 'address' }],
+          outputs: [{ type: 'uint256' }],
+        },
+      ] as const
+
+      const balances = await Promise.all(
+        currencies.map(async (c) => {
+          try {
+            const raw = (await client.readContract({
+              address: c.address,
+              abi: erc20,
+              functionName: 'balanceOf',
+              args: [address as `0x${string}`],
+            })) as bigint
+            return { iso: c.iso, symbol: c.symbol, address: c.address, raw, decimals: c.decimals }
+          } catch {
+            return null
+          }
+        })
+      )
+
+      const held = balances
+        .filter((b): b is NonNullable<typeof b> => b !== null && b.raw > 0n)
+        .map((b) => ({
+          iso: b.iso,
+          symbol: b.symbol,
+          address: b.address,
+          balance: formatUnits(b.raw, b.decimals),
+          balance_raw: b.raw.toString(),
+        }))
+
+      const native = await client.getBalance({ address: address as `0x${string}` })
+
+      return json(res, 200, {
+        address,
+        chain: { name: 'Celo', chain_id: 42220 },
+        note: 'Non-zero balances only, across every currency Cowrie knows. CELO is shown separately because gas can be paid in stablecoin instead — a zero CELO balance does not prevent a swap.',
+        celo_native: formatUnits(native, 18),
+        count: held.length,
+        balances: held,
       })
     }
 

@@ -164,6 +164,15 @@ export function landingPage(stats: LiveStats): string {
   assumes nobody did — it takes payment per call over <a href="https://x402.org">x402</a>,
   from the wallet the agent already has.</p>
 
+  <div class="note">
+    <strong>Reading this at a weekend?</strong>
+    Naira and every other FX pair will return <code>market_closed</code> with a retry
+    window — that is the error contract working, not an outage. Dollar-denominated
+    pairs like <a href="/quote?from=USD&amp;to=USDC&amp;amount=100">USD → USDC</a> price
+    at any hour. <a href="/">GET /</a> returns a live quote of each, computed when you
+    request it, so you can see both without waiting for Monday.
+  </div>
+
   <pre><code>curl "${BASE}/quote?from=USD&amp;to=NGN&amp;amount=100"</code></pre>
   <pre><code>{
   "from": "USD", "to": "NGN",
@@ -208,6 +217,8 @@ export function landingPage(stats: LiveStats): string {
     <tr><td><a href="/pairs">GET /pairs</a></td><td>Which pairs are quotable right now</td><td class="free">free</td></tr>
     <tr><td><a href="/errors">GET /errors</a></td><td>Every error, machine-readable</td><td class="free">free</td></tr>
     <tr><td><a href="/proof">GET /proof</a></td><td>Mined transactions this API produced</td><td class="free">free</td></tr>
+    <tr><td><a href="/healthz">GET /healthz</a></td><td>Health check — version, uptime, market state</td><td class="free">free</td></tr>
+    <tr><td><code>GET /balance/{address}</code></td><td>What an address holds, so you can check affordability before planning</td><td class="free">free</td></tr>
     <tr><td><a href="/quote?from=USD&amp;to=NGN&amp;amount=100">GET /quote</a></td><td>Price a conversion</td><td class="free">free</td></tr>
     <tr><td><code>POST /swap</code></td><td>Unsigned transactions that execute a conversion</td><td>$0.001</td></tr>
   </table>
