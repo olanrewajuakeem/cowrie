@@ -40,7 +40,84 @@ export interface Quote {
    * to derive it themselves.
    */
   expires_at: string
+  /**
+   * Mento's per-pool trading limits for this pair, when a single-hop route
+   * exposes them.
+   *
+   * A reviewer wanted to plan a 10,000 USD swap and had "no programmatic way
+   * to check feasibility without attempting it". These are the protocol's own
+   * caps, not our estimates.
+   */
+  limits: {
+    max_amount_in: string | null
+    max_amount_out: string | null
+    circuit_breaker_ok: boolean | null
+    note: string
+  } | null
   market: MarketState
+}
+
+/**
+ * Trading limits for a pair, read from the pool behind its route.
+ *
+ * Only meaningful for single-hop routes: a multi-hop trade is bounded by every
+ * pool it crosses, and reporting one pool's cap as the pair's cap would be a
+ * confident wrong answer. Returns null rather than guess.
+ */
+async function pairLimits(
+  mento: any,
+  fromAddress: string,
+  toAddress: string,
+  fromIso: string,
+  toIso: string
+): Promise<Quote['limits']> {
+  try {
+    const route: any = await mento.routes.findRoute(fromAddress, toAddress)
+    const hops = route?.path ?? []
+    if (hops.length !== 1) {
+      return {
+        max_amount_in: null,
+        max_amount_out: null,
+        circuit_breaker_ok: null,
+        note: `Route crosses ${hops.length} pools; limits apply per pool, so no single cap describes this pair. Quote a smaller amount to test feasibility.`,
+      }
+    }
+
+    const status: any = await mento.trading.getPoolTradabilityStatus(hops[0])
+    const limits: any[] = status?.limits ?? []
+    const forAsset = (addr: string) =>
+      limits.find((l) => String(l.asset).toLowerCase() === addr.toLowerCase())
+
+    const inLimit = forAsset(fromAddress)
+    const outLimit = forAsset(toAddress)
+
+    /**
+     * Each limit entry carries its own `decimals`, and it varies by pool: the
+     * USD/NGN pool reports decimals 0 with values already in whole tokens,
+     * while USD/USDC reports 18 with raw values. Formatting everything as
+     * whole units without checking produced a cap of 500000000000000000000,
+     * which an agent would read as effectively unlimited.
+     */
+    const human = (entry: any, field: 'maxIn' | 'maxOut') => {
+      if (!entry || entry[field] === undefined || entry[field] === null) return null
+      try {
+        return formatUnits(BigInt(entry[field]), Number(entry.decimals ?? 0))
+      } catch {
+        return null
+      }
+    }
+
+    return {
+      max_amount_in: human(inLimit, 'maxIn'),
+      max_amount_out: human(outLimit, 'maxOut'),
+      circuit_breaker_ok: status?.circuitBreakerOk ?? null,
+      note: `Mento's own caps for this pool, in whole units of each currency. Exceeding max_amount_in (${fromIso}) or max_amount_out (${toIso}) makes the swap revert.`,
+    }
+  } catch {
+    // Limits are informational; never fail a good quote because they were
+    // unavailable.
+    return null
+  }
 }
 
 export type ErrorCode =
@@ -308,6 +385,7 @@ export async function getQuote(
         // anything touching an FX oracle can shift with each reporting round.
         max_age_seconds: maxAge,
         expires_at: new Date(now.getTime() + maxAge * 1000).toISOString(),
+        limits: await pairLimits(mento, from.address, to.address, from.iso, to.iso),
         market: marketState(now, marketOpen),
       },
     }

@@ -241,8 +241,22 @@ export function landingPage(stats: LiveStats): string {
     <tr><td><code>route</code></td><td>string[]</td><td>Path taken, ordered from source to target.</td></tr>
     <tr><td><code>as_of</code></td><td>string</td><td>ISO 8601 timestamp of the quote.</td></tr>
     <tr><td><code>market.open</code></td><td>boolean</td><td>Whether FX is trading.</td></tr>
+    <tr><td><code>max_age_seconds</code></td><td>number</td><td>How long to treat this quote as usable. 300 for dollar-denominated pairs, 30 for oracle-priced ones.</td></tr>
+    <tr><td><code>expires_at</code></td><td>string</td><td><code>as_of + max_age_seconds</code>, computed so you don't have to.</td></tr>
+    <tr><td><code>limits</code></td><td>object | null</td><td>Mento's own caps for this pool — <code>max_amount_in</code>, <code>max_amount_out</code> in whole units, and <code>circuit_breaker_ok</code>. Lets you check a large trade is feasible without attempting it. <code>null</code> or all-null on multi-hop routes, where no single cap describes the pair.</td></tr>
     <tr><td><code>market.source</code></td><td>string</td><td><code>observed</code> means Mento was asked directly — authoritative. <code>schedule</code> means the interbank calendar was used as a fallback, which is only an approximation.</td></tr>
   </table>
+
+  <div class="note">
+    <strong>A stale quote cannot produce a bad swap.</strong>
+    <code>max_age_seconds</code> is advisory, for deciding whether a price you are
+    showing or reasoning about is still current. It does not gate execution:
+    <code>POST /swap</code> re-prices against the chain when it builds the transactions,
+    and the binding protection is <code>min_amount_out</code> (0.5% slippage floor,
+    reverts rather than filling worse) together with <code>deadline</code>. So a
+    quote-plan-sign loop that takes longer than 30 seconds is fine — you do not need to
+    re-quote before calling <code>/swap</code>.
+  </div>
 
   <h3>POST /swap</h3>
   <p>Returns unsigned transactions that perform the conversion. Costs <b>$0.001</b>,

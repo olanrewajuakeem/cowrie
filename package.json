@@ -8,6 +8,7 @@
     "probe:pools": "tsx src/probe-pools.ts",
     "probe:fpmm": "tsx src/probe-fpmm.ts",
     "probe:swap": "tsx src/probe-swap.ts",
+    "probe:limits": "tsx src/probe-limits.ts",
     "mint": "tsx src/mint-agent.ts",
     "swap": "tsx src/execute-swap.ts",
     "dev": "tsx watch src/server.ts",
