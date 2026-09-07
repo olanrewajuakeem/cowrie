@@ -221,6 +221,61 @@ export function openapi() {
           responses: { '200': { description: 'Error catalogue' } },
         },
       },
+      '/healthz': {
+        get: {
+          summary: 'Health check',
+          description:
+            'Version, uptime, chain, observed market state, cache backend, and a `degraded` field that is non-null when the currency registry fell back to hardcoded collateral addresses.',
+          responses: {
+            '200': {
+              description: 'Service health',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      ok: { type: 'boolean' },
+                      version: { type: 'string' },
+                      uptime_seconds: { type: 'integer' },
+                      market_open: { type: 'boolean' },
+                      cache: { type: 'string', enum: ['redis', 'disk'] },
+                      degraded: { type: ['string', 'null'] },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      '/proof': {
+        get: {
+          summary: 'Mined transactions this API produced',
+          description:
+            'Celo mainnet transactions built by POST /swap, signed by an ordinary wallet and mined — provided because documentation cannot demonstrate that the endpoint returns usable transactions. Each entry carries a hash checkable on Celoscan. These are recorded facts, not a live health check.',
+          responses: { '200': { description: 'Proof entries and how to verify them yourself' } },
+        },
+      },
+      '/balance/{address}': {
+        get: {
+          summary: 'Balances held by an address',
+          description:
+            'Every non-zero balance the address holds across the currencies Cowrie knows, so an agent can check it can afford a swap before planning one. CELO is reported separately: a zero CELO balance does not prevent a swap, because gas can be paid in stablecoin.',
+          parameters: [
+            {
+              name: 'address',
+              in: 'path',
+              required: true,
+              schema: { type: 'string', pattern: '^0x[a-fA-F0-9]{40}$' },
+              description: 'Celo address to inspect.',
+            },
+          ],
+          responses: {
+            '200': { description: 'Non-zero balances' },
+            ...responsesFor(['invalid_request']),
+          },
+        },
+      },
       '/status': {
         get: {
           summary: 'Market state and service health',
