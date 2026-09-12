@@ -7,7 +7,7 @@
  * Sunday 21:00 UTC, retry in 108000 seconds".
  */
 import { parseUnits, formatUnits } from 'viem'
-import { getMento, loadCurrencies, resolve, type Currency } from './tokens.js'
+import { getMento, loadCurrencies, resolve, loadRoutablePairs, type Currency } from './tokens.js'
 import { isMarketOpen, marketState, nextOpen, type MarketState } from './market.js'
 import { remember, recall, type StaleRate } from './cache.js'
 
@@ -288,7 +288,19 @@ export async function getQuote(
   const from = resolve(currencies, fromInput)
   const to = resolve(currencies, toInput)
 
-  const supported = [...new Set(currencies.values())].map((c) => c.iso).sort()
+  /**
+   * Only currencies that can actually be quoted.
+   *
+   * This list previously included every token in the registry, CELO among
+   * them — which has no Mento pool. Handing a caller a "supported" list
+   * containing something that always fails is worse than a shorter list.
+   */
+  const all = [...new Set(currencies.values())]
+  const routable = await loadRoutablePairs(rpcUrl)
+  const supported = all
+    .filter((c) => all.some((o) => o.iso !== c.iso && routable.has(`${c.iso}/${o.iso}`)))
+    .map((c) => c.iso)
+    .sort()
 
   if (!from || !to) {
     const bad = !from ? fromInput : toInput

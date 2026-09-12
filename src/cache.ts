@@ -150,6 +150,35 @@ export async function allCached(): Promise<CachedRate[]> {
   }
 }
 
+/**
+ * Short-lived shared cache for computed page data.
+ *
+ * An in-process cache does nothing for serverless: every cold start begins
+ * empty, and rendering a live quote, a provoked error and a swap plan took
+ * 5.4s on a cold instance. Redis is shared across instances, so the first
+ * request to a new one reads what a previous instance computed seconds ago.
+ *
+ * Never throws — a cache miss must degrade to recomputing, not to an error.
+ */
+export async function getShared<T>(key: string): Promise<T | null> {
+  if (!useRedis) return null
+  try {
+    const raw = await redis(`get/${key}`)
+    return typeof raw === 'string' ? (JSON.parse(raw) as T) : null
+  } catch {
+    return null
+  }
+}
+
+export async function setShared(key: string, value: unknown, ttlSeconds: number): Promise<void> {
+  if (!useRedis) return
+  try {
+    await redis(`setex/${key}/${ttlSeconds}`, JSON.stringify(value))
+  } catch {
+    // Losing a cache write only costs latency.
+  }
+}
+
 /** Which backend is live — surfaced on /status so the deploy is verifiable. */
 export function cacheBackend(): 'redis' | 'disk' {
   return useRedis ? 'redis' : 'disk'

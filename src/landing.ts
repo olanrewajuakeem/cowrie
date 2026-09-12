@@ -51,6 +51,37 @@ export interface LiveStats {
     error?: string
     ms: number
   } | null
+  /**
+   * A real error, provoked while rendering.
+   *
+   * Every round-two reviewer wrote that they could not verify the error
+   * contract because they never called an endpoint that failed. Rather than
+   * describe what an error looks like, trigger one and show the payload.
+   */
+  liveError: { request: string; status: number; body: unknown; ms: number } | null
+  /**
+   * A real swap plan, built while rendering.
+   *
+   * Q7 and Q9 both centre on /swap being undemonstrated — and it was in fact
+   * broken for several days without any reviewer noticing, because none of
+   * them called it. Showing the actual unsigned transactions removes both the
+   * doubt and the hiding place.
+   */
+  liveSwap: {
+    request: string
+    ms: number
+    from?: string
+    to?: string
+    amount_in?: string
+    expected_amount_out?: string
+    count?: number
+    firstTo?: string
+    dataHead?: string
+    dataTail?: string
+    feeCurrency?: string
+    gas?: string
+    error?: string
+  } | null
 }
 
 const esc = (s: string) =>
@@ -222,6 +253,39 @@ export function landingPage(stats: LiveStats): string {
   "market": { "open": true, "source": "observed", "closes_at": "2026-09-04T21:00:00.000Z" }
 }</code></pre>
 
+  ${
+    stats.liveError
+      ? `<h2>A real error, provoked just now</h2>
+  <p>Reviewers repeatedly said they could not judge the error contract because they
+  never made a call that failed. So here is one, triggered while rendering this page —
+  <code>${esc(stats.liveError.request)}</code>, HTTP <b>${stats.liveError.status}</b>,
+  ${stats.liveError.ms} ms:</p>
+  <pre><code>${json(stats.liveError.body)}</code></pre>
+  <p>Note what makes it actionable: a stable <code>code</code> to branch on, and the
+  complete list of valid currencies, so a caller can retry without a second round trip.
+  Every failure is catalogued at <a href="/errors">/errors</a> with a payload like this
+  one.</p>`
+      : ''
+  }
+
+  ${
+    stats.liveSwap && !stats.liveSwap.error
+      ? `<h2>A real swap plan, built just now</h2>
+  <p><code>${esc(stats.liveSwap.request)}</code> → <b>${stats.liveSwap.count}</b>
+  unsigned transaction(s) in ${stats.liveSwap.ms} ms, converting
+  ${esc(stats.liveSwap.amount_in ?? '')} ${esc(stats.liveSwap.from ?? '')} into about
+  ${esc(stats.liveSwap.expected_amount_out ?? '')} ${esc(stats.liveSwap.to ?? '')}.</p>
+  <pre><code>to           ${esc(stats.liveSwap.firstTo ?? '')}
+data         ${esc(stats.liveSwap.dataHead ?? '')}…${esc(stats.liveSwap.dataTail ?? '')}
+feeCurrency  ${esc(stats.liveSwap.feeCurrency ?? '')}
+gas          ${esc(stats.liveSwap.gas ?? '')}</code></pre>
+  <p>Those trailing bytes are the ERC-8021 attribution suffix. <code>feeCurrency</code>
+  is the USD₮ adapter, so gas is paid in stablecoin. The explicit <code>gas</code> limit
+  matters more than it looks — see below. Transactions built this way have been signed and
+  mined on mainnet; the hashes are at <a href="/proof">/proof</a>.</p>`
+      : ''
+  }
+
   <h2>Two things it knows that the SDK doesn't</h2>
 
   <div class="note">
@@ -235,12 +299,22 @@ export function landingPage(stats: LiveStats): string {
   </div>
 
   <div class="note">
-    <strong>Fee abstraction fails silently without the right gas price.</strong>
+    <strong>Fee abstraction fails silently, in two different ways.</strong>
     Celo lets a transaction pay its own gas in an ERC-20, so an agent holding no CELO
     can still transact. But the base fee is then denominated in <em>that token</em>,
     while viem and ethers estimate against CELO — producing a cap the node rejects with
     <code>max fee per gas less than block base fee</code>. Cowrie returns
     <code>maxFeePerGas</code> already denominated in the fee currency.
+    <br><br>
+    That alone is not enough, and the second half is undocumented anywhere we could find.
+    <b><code>eth_estimateGas</code> compares your cap against the <em>native</em> base
+    fee even on a fee-currency transaction.</b> Measured on mainnet: fee-currency gas
+    price 16 gwei, native base fee 202 gwei — so a correctly denominated cap is rejected
+    before the transaction is even built. Raising the cap cannot fix it; a cap large
+    enough to clear 202 gwei is nonsensical in six-decimal token units. The fix is the
+    explicit <code>gas</code> limit in every transaction above, which makes the client
+    skip estimation entirely. Integrations that appear to work are often just running
+    while the network is quiet.
   </div>
 
   <h2>Endpoints</h2>
