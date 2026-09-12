@@ -23,7 +23,7 @@
 import { encodeFunctionData, parseAbi, parseUnits, formatUnits } from 'viem'
 import { toDataSuffix } from '@celo/attribution-tags'
 import { createRequire } from 'node:module'
-import { getMento, loadCurrencies, resolve } from './tokens.js'
+import { getMento, loadCurrencies, resolve, getPublicClient } from './tokens.js'
 import { isMarketOpen } from './market.js'
 import { classifyError, type FxError } from './fx.js'
 
@@ -229,15 +229,19 @@ export async function buildSwap(
 
     const router = built.params.to as `0x${string}`
     const transactions: UnsignedTx[] = []
-    const fees = await feeParams(
-      (mento as any).client ?? (mento as any).publicClient,
-      USDT_FEE_ADAPTER
-    )
+    /**
+     * Use our own client rather than reaching into the Mento instance.
+     * `(mento as any).client` stopped existing once we began passing a
+     * PublicClient into Mento.create(), which broke every /swap call with
+     * "Cannot read properties of undefined (reading 'request')". Nothing
+     * caught it because no reviewer ever called /swap.
+     */
+    const fees = await feeParams(getPublicClient(rpcUrl), USDT_FEE_ADAPTER)
 
     // Approval is standard ERC-20, so we read and encode it directly rather
     // than relying on another SDK signature. Only included when actually
     // needed — a redundant approval costs the agent gas for nothing.
-    const publicClient = (mento as any).client ?? (mento as any).publicClient
+    const publicClient = getPublicClient(rpcUrl)
     let allowance = 0n
     try {
       allowance = (await publicClient.readContract({
