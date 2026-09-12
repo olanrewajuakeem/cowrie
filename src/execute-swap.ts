@@ -112,17 +112,30 @@ for (const [i, tx] of body.transactions.entries()) {
   // Use the fee values Cowrie returned. They are denominated in the fee
   // currency; letting viem estimate instead produces a cap priced in CELO,
   // which the node rejects as below the base fee.
+  //
+  // `--gas-in-celo` skips all of that and pays gas natively, for a wallet that
+  // holds CELO and just needs the transaction through. Fee abstraction is the
+  // interesting path, not the only one.
+  const nativeGas = process.argv.includes('--gas-in-celo')
   const hash = await walletClient.sendTransaction({
     to: tx.to as `0x${string}`,
     data: tx.data as `0x${string}`,
     value: BigInt(tx.value ?? '0'),
-    feeCurrency: tx.feeCurrency as `0x${string}`,
-    ...(tx.maxFeePerGas
-      ? {
-          maxFeePerGas: BigInt(tx.maxFeePerGas),
-          maxPriorityFeePerGas: BigInt(tx.maxPriorityFeePerGas),
-        }
-      : {}),
+    ...(nativeGas
+      ? {}
+      : {
+          feeCurrency: tx.feeCurrency as `0x${string}`,
+          // The explicit gas limit is what makes this work: without it viem
+          // calls eth_estimateGas, which compares our fee-currency cap against
+          // the native base fee and rejects it.
+          ...(tx.gas ? { gas: BigInt(tx.gas) } : {}),
+          ...(tx.maxFeePerGas
+            ? {
+                maxFeePerGas: BigInt(tx.maxFeePerGas),
+                maxPriorityFeePerGas: BigInt(tx.maxPriorityFeePerGas),
+              }
+            : {}),
+        }),
   } as any)
   console.log(`  sent    ${hash}`)
   console.log(`  https://celoscan.io/tx/${hash}`)
@@ -148,20 +161,41 @@ for (const hash of hashes) {
   }
 }
 
-// Pin both reads to the block the last transaction landed in. Reading
-// "latest" straight after a receipt can hit a load-balanced node that has not
-// applied the block yet, which reports balances as though nothing happened.
-const usdtAfter = (await publicClient.readContract({
-  address: USDT_TOKEN,
-  abi: erc20,
-  functionName: 'balanceOf',
-  args: [account.address],
-  blockNumber: lastBlock,
-})) as bigint
-const celoAfter = await publicClient.getBalance({
-  address: account.address,
-  blockNumber: lastBlock,
-})
+/**
+ * Read balances at the block the last transaction landed in, falling back to
+ * latest.
+ *
+ * Pinning avoids a stale read from a node that has not applied the block yet.
+ * But with a multi-provider fallback transport the pinned read can land on a
+ * node that does not have that block at all — `block is out of range` — and
+ * crashing here would be absurd: the money has already moved and the receipts
+ * are printed above. Reporting is never worth failing a successful run.
+ */
+async function balancesAt(block: bigint) {
+  const read = async (blockNumber?: bigint) =>
+    Promise.all([
+      publicClient.readContract({
+        address: USDT_TOKEN,
+        abi: erc20,
+        functionName: 'balanceOf',
+        args: [account.address],
+        ...(blockNumber ? { blockNumber } : {}),
+      }) as Promise<bigint>,
+      publicClient.getBalance({
+        address: account.address,
+        ...(blockNumber ? { blockNumber } : {}),
+      }),
+    ])
+
+  try {
+    return await read(block)
+  } catch {
+    await new Promise((r) => setTimeout(r, 2000))
+    return read()
+  }
+}
+
+const [usdtAfter, celoAfter] = await balancesAt(lastBlock)
 
 console.log(`\nbalances after:   ${formatUnits(celoAfter, 18)} CELO, ${formatUnits(usdtAfter, 6)} USDT`)
 console.log(`CELO delta:       ${formatUnits(celoAfter - celoBefore, 18)}`)

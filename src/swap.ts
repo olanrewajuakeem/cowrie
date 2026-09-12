@@ -61,7 +61,56 @@ export interface UnsignedTx {
    */
   maxFeePerGas: string
   maxPriorityFeePerGas: string
+  /**
+   * Explicit gas limit — and you must use it.
+   *
+   * Celo's `eth_estimateGas` validates `maxFeePerGas` against the NATIVE base
+   * fee even for a fee-currency transaction, and the two are in different
+   * units. Observed on mainnet: the fee-currency gas price was 16 gwei while
+   * the native base fee was 202 gwei, so any correctly-denominated cap is
+   * rejected as "max fee per gas less than block base fee" — before the
+   * transaction is ever built.
+   *
+   * Raising the cap is not the fix; a cap large enough to clear the native
+   * base fee would be absurd in fee-currency units and fail a balance check.
+   * Supplying `gas` makes the client skip estimation entirely, and the real
+   * transaction validation then applies fee-currency rules correctly.
+   */
+  gas: string
   description: string
+}
+
+/**
+ * Estimate gas without supplying a fee cap.
+ *
+ * Passing maxFeePerGas here triggers the native-base-fee comparison described
+ * above, so the estimate is requested bare and the caller supplies the result
+ * as an explicit limit. Falls back to a generous constant rather than failing
+ * the whole plan — an over-estimate costs nothing, since unused gas is
+ * refunded, while a missing limit puts the caller straight back into the
+ * estimation trap.
+ */
+async function estimateGasFor(
+  client: any,
+  from: string,
+  to: string,
+  data: string,
+  feeCurrency: string,
+  fallback: bigint
+): Promise<bigint> {
+  try {
+    const gas: bigint = await client.estimateGas({
+      account: from as `0x${string}`,
+      to: to as `0x${string}`,
+      data: data as `0x${string}`,
+      feeCurrency: feeCurrency as `0x${string}`,
+    })
+    // 25% headroom: the estimate is taken before the approval lands, and the
+    // swap's real cost can differ slightly once allowance state changes.
+    return (gas * 125n) / 100n
+  } catch {
+    return fallback
+  }
 }
 
 /** Gas price in a given fee currency, via Celo's currency-aware RPC methods. */
@@ -73,11 +122,18 @@ async function feeParams(
     client.request({ method: 'eth_gasPrice', params: [feeCurrency] }),
     client.request({ method: 'eth_maxPriorityFeePerGas', params: [feeCurrency] }),
   ])
-  // Double the observed price as headroom: the base fee can rise between our
-  // quote and the agent actually broadcasting, and an underpriced transaction
-  // is rejected outright rather than merely being slow.
+  /**
+   * Five times the observed price, as headroom.
+   *
+   * maxFeePerGas is a CAP, not the price paid: EIP-1559 charges the actual
+   * base fee and refunds the difference, so a generous cap costs nothing. A 2x
+   * cap was too tight in practice — the fee-currency base fee rose while an
+   * approval was confirming, and the swap that followed seconds later was
+   * rejected outright with "max fee per gas less than block base fee",
+   * stranding the caller mid-sequence with the approval already paid for.
+   */
   return {
-    maxFeePerGas: BigInt(price) * 2n,
+    maxFeePerGas: BigInt(price) * 5n,
     maxPriorityFeePerGas: BigInt(tip),
   }
 }
@@ -256,15 +312,26 @@ export async function buildSwap(
     }
 
     if (allowance < amountIn) {
+      const approvalData = tag(
+        encodeFunctionData({ abi: erc20, functionName: 'approve', args: [router, amountIn] })
+      )
       transactions.push({
         to: from.address,
-        data: tag(
-          encodeFunctionData({ abi: erc20, functionName: 'approve', args: [router, amountIn] })
-        ),
+        data: approvalData,
         value: '0',
         feeCurrency: USDT_FEE_ADAPTER,
         maxFeePerGas: String(fees.maxFeePerGas),
         maxPriorityFeePerGas: String(fees.maxPriorityFeePerGas),
+        gas: String(
+          await estimateGasFor(
+            publicClient,
+            recipient,
+            from.address,
+            approvalData,
+            USDT_FEE_ADAPTER,
+            200_000n
+          )
+        ),
         description: `Approve Mento's router to spend ${amount} ${from.iso}. Required before the swap; send this first and wait for it to confirm.`,
       })
     }
@@ -276,6 +343,19 @@ export async function buildSwap(
       feeCurrency: USDT_FEE_ADAPTER,
       maxFeePerGas: String(fees.maxFeePerGas),
       maxPriorityFeePerGas: String(fees.maxPriorityFeePerGas),
+      // Estimated with the CURRENT allowance, which may still be zero when an
+      // approval precedes this. The fallback covers that case; unused gas is
+      // refunded either way.
+      gas: String(
+        await estimateGasFor(
+          publicClient,
+          recipient,
+          router,
+          tag(built.params.data),
+          USDT_FEE_ADAPTER,
+          500_000n
+        )
+      ),
       description: `Swap ${amount} ${from.iso} for at least ${formatUnits(BigInt(built.amountOutMin), to.decimals)} ${to.iso}.`,
     })
 
