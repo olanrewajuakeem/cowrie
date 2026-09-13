@@ -207,8 +207,19 @@ async function computeLiveStats(): Promise<LiveStats> {
   // below; it should not be the first thing a reader sees.
   const started = Date.now()
   let liveQuote: LiveStats['liveQuote'] = null
+  let liveOracle: LiveStats['liveOracle'] = null
   try {
     const ngn = await getQuote('USD', 'NGN', '100', RPC_URL)
+    if (!ngn.ok) {
+      // The unavailable-pair payload, captured rather than described. Status
+      // comes from the catalogue so the page can never disagree with /errors.
+      liveOracle = {
+        request: 'GET /quote?from=USD&to=NGN&amount=100',
+        status: ERROR_CATALOGUE.find((e) => e.code === ngn.error.code)?.status ?? 503,
+        body: { error: ngn.error },
+        ms: Date.now() - started,
+      }
+    }
     if (ngn.ok) {
       liveQuote = {
         from: 'USD',
@@ -217,6 +228,7 @@ async function computeLiveStats(): Promise<LiveStats> {
         rate: ngn.quote.rate,
         as_of: ngn.quote.as_of,
         ms: Date.now() - started,
+        body: ngn.quote,
       }
     } else {
       const usdc = await getQuote('USD', 'USDC', '100', RPC_URL)
@@ -228,11 +240,23 @@ async function computeLiveStats(): Promise<LiveStats> {
             rate: usdc.quote.rate,
             as_of: usdc.quote.as_of,
             ms: Date.now() - started,
+            body: usdc.quote,
           }
         : { from: 'USD', to: 'NGN', error: ngn.error.code, ms: Date.now() - started }
     }
   } catch {
     liveQuote = null
+  }
+
+  // The chain height the quote above was priced against. A reader who only
+  // ever fetches this one URL cannot check a claim by calling a second
+  // endpoint, but they can check a block number against a timestamp — so the
+  // page carries one. Never let a stalled RPC cost us the whole page.
+  let blockNumber: string | null = null
+  try {
+    blockNumber = (await getPublicClient(RPC_URL).getBlockNumber()).toString()
+  } catch {
+    blockNumber = null
   }
 
   // A real error and a real swap plan, produced now. Reviewers only ever fetch
@@ -285,7 +309,9 @@ async function computeLiveStats(): Promise<LiveStats> {
     tradable,
     pairs,
     degraded: registryDegraded(),
+    blockNumber,
     liveQuote,
+    liveOracle,
     liveError,
     liveSwap,
   }

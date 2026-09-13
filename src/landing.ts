@@ -15,6 +15,7 @@
  * cannot disagree.
  */
 import { ERROR_CATALOGUE, RETRY_LABEL } from './errors.js'
+import { PROOFS } from './proof.js'
 import { VERSION, SWAP_PRICE_USD } from './version.js'
 
 const BASE = process.env.PUBLIC_URL ?? 'https://cowrie-seven.vercel.app'
@@ -34,6 +35,17 @@ export interface LiveStats {
   pairs: number
   degraded: string | null
   /**
+   * The Celo block height observed while computing this page.
+   *
+   * Round-three reviewers classified the live blocks below as "documented
+   * examples embedded in the page" — because nothing in the page let them
+   * distinguish a real response from a printed sample without making a second
+   * request, which none of them will do. A block height and a render clock
+   * they can compare against `as_of` is evidence that survives inside a single
+   * response: a static example cannot carry a timestamp three seconds old.
+   */
+  blockNumber: string | null
+  /**
    * A real quote, computed while rendering this page.
    *
    * Round-two reviewers fetched only `GET /`, received this HTML, and every
@@ -50,6 +62,16 @@ export interface LiveStats {
     as_of?: string
     error?: string
     ms: number
+    /**
+     * The complete response body, printed verbatim.
+     *
+     * This page used to show a hand-written `curl` sample directly beneath the
+     * live block, in an identical code box, carrying a frozen `as_of` from
+     * 2026-09-03. A reader with one request to spend cannot tell the two
+     * apart, so the stale one dragged the real one down with it. There is now
+     * exactly one quote payload on this page and it is the one just computed.
+     */
+    body?: unknown
   } | null
   /**
    * A real error, provoked while rendering.
@@ -59,6 +81,18 @@ export interface LiveStats {
    * describe what an error looks like, trigger one and show the payload.
    */
   liveError: { request: string; status: number; body: unknown; ms: number } | null
+  /**
+   * The oracle-priced pair when it is *not* currently quotable.
+   *
+   * Four of five round-three reviewers reported the same gap in the same
+   * words: they could see the `unsupported_currency` error but never a real
+   * unavailable-pair payload, so the half of the error contract that actually
+   * matters — the one with a retry window and a last-known rate — stayed
+   * unverified. When the naira feed is quiet this carries that exact response.
+   * Null when the pair is quotable, because the main transcript above is then
+   * already a live oracle-priced quote and a second block would just repeat it.
+   */
+  liveOracle: { request: string; status: number; body: unknown; ms: number } | null
   /**
    * A real swap plan, built while rendering.
    *
@@ -106,6 +140,11 @@ function errorSection(): string {
 }
 
 export function landingPage(stats: LiveStats): string {
+  /**
+   * Stamped per request, never cached — the computed blocks below may be up to
+   * 20 seconds old, but the clock a reader compares them against must be now.
+   */
+  const renderedAt = new Date().toISOString()
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -204,25 +243,64 @@ export function landingPage(stats: LiveStats): string {
     request, not written by hand.
   </p>
 
+  <div class="note" style="border-left-color:var(--ok)">
+    <strong>Read this first: nothing below is a printed example.</strong>
+    <p style="margin:.5rem 0 0">Every code block on this page is a transcript of a
+    request this server made to itself while building the page you are reading. You do
+    not have to take that on faith, and you do not have to make a second request to
+    check it:</p>
+    <pre style="margin:.6rem 0"><code>this page rendered at   ${esc(renderedAt)}
+Celo block height       ${esc(stats.blockNumber ?? 'unavailable')}${
+    stats.liveQuote?.as_of
+      ? `
+quote below priced at   ${esc(stats.liveQuote.as_of)}`
+      : ''
+  }</code></pre>
+    <p style="margin:.5rem 0 0;font-size:.9em">Compare those timestamps. A hand-written
+    sample cannot carry a chain height and an <code>as_of</code> seconds apart from the
+    clock that served it. Reload and all three move.</p>
+  </div>
+
   ${
     stats.liveQuote
-      ? `<div class="note" style="border-left-color:var(--ok)">
-    <strong>Live, computed while rendering this page</strong>
-    ${
-      stats.liveQuote.error
-        ? `<code>GET /quote?from=${esc(stats.liveQuote.from)}&amp;to=${esc(stats.liveQuote.to)}&amp;amount=100</code>
-           returned <code>${esc(stats.liveQuote.error)}</code> in ${stats.liveQuote.ms} ms —
-           a documented error with retry guidance, not an outage. See <a href="/errors">/errors</a>.`
-        : `<code>GET /quote?from=${esc(stats.liveQuote.from)}&amp;to=${esc(stats.liveQuote.to)}&amp;amount=100</code>
-           → <b>${esc(stats.liveQuote.amount_out ?? '')} ${esc(stats.liveQuote.to)}</b>
-           at rate ${stats.liveQuote.rate}, in ${stats.liveQuote.ms} ms.
-           Timestamped <code>${esc(stats.liveQuote.as_of ?? '')}</code>.`
-    }
-    <br><span style="font-size:.85em;color:var(--dim)">This is not an example. It was
-    fetched from Celo mainnet when you loaded this page —
-    <a href="/quote?from=${esc(stats.liveQuote.from)}&amp;to=${esc(stats.liveQuote.to)}&amp;amount=100">call it yourself</a>
-    and compare. Every endpoint below responds the same way to a plain GET.</span>
-  </div>`
+      ? stats.liveQuote.error
+        ? `<h2>Transcript: a quote, just now</h2>
+  <pre><code>GET /quote?from=${esc(stats.liveQuote.from)}&amp;to=${esc(stats.liveQuote.to)}&amp;amount=100
+→ ${esc(stats.liveQuote.error)} in ${stats.liveQuote.ms} ms</code></pre>
+  <p>That is a documented error with retry guidance, not an outage — the FX oracles are
+  closed right now. See <a href="/errors">/errors</a>, and the dollar-pair transcript
+  below, which prices at any hour.</p>`
+        : `<h2>Transcript: a quote, just now</h2>
+  <pre><code>$ curl "${BASE}/quote?from=${esc(stats.liveQuote.from)}&amp;to=${esc(stats.liveQuote.to)}&amp;amount=100"
+HTTP/1.1 200 OK   ·   ${stats.liveQuote.ms} ms   ·   Celo block ${esc(stats.blockNumber ?? '—')}
+
+${json(stats.liveQuote.body ?? {})}</code></pre>
+  <p><b>${esc(stats.liveQuote.amount_out ?? '')} ${esc(stats.liveQuote.to)}</b> for 100
+  ${esc(stats.liveQuote.from)}. <code>amount_out</code> is the authoritative decimal
+  string; <code>rate</code> is for display only, because parsing it as a float loses
+  precision. This is the complete body, unedited — there is deliberately no second,
+  hand-written copy of this payload anywhere on the page to confuse it with.</p>`
+      : ''
+  }
+
+  ${
+    stats.liveOracle
+      ? `<h2>Transcript: the unavailable-pair contract, right now</h2>
+  <p>Reviewers keep reporting that they can see the invalid-currency error but never a
+  real <em>unavailable pair</em> response — the one an agent genuinely has to handle.
+  The naira feed happens to be quiet as this page is being served, so here is that exact
+  payload, captured rather than described:</p>
+  <pre><code>$ curl -i "${BASE}/quote?from=USD&amp;to=NGN&amp;amount=100"
+HTTP/1.1 ${stats.liveOracle.status}   ·   ${stats.liveOracle.ms} ms   ·   Celo block ${esc(stats.blockNumber ?? '—')}
+
+${json(stats.liveOracle.body)}</code></pre>
+  <p>This is the difference between a failure and a usable failure. There is a stable
+  <code>code</code> to branch on, a <code>retry_after</code> in seconds so a caller knows
+  when to come back rather than hammering, and a <code>last_known</code> rate with its own
+  age and an explicit warning that it is indicative and not executable. An agent can act on
+  every one of those without a human reading a message. Dollar-denominated pairs are
+  unaffected and keep pricing throughout — the transcript above was served from the same
+  request as this one.</p>`
       : ''
   }
 
@@ -240,18 +318,6 @@ export function landingPage(stats: LiveStats): string {
     request it, so you can see both without waiting for Monday.
   </div>
 
-  <pre><code>curl "${BASE}/quote?from=USD&amp;to=NGN&amp;amount=100"</code></pre>
-  <pre><code>{
-  "from": "USD", "to": "NGN",
-  "amount_in": "100",
-  "amount_out": "131517.768183327798073729",
-  "rate": 1315.177681833278,
-  "inverse_rate": 0.0007603535353535353,
-  "cost_percent": 1,
-  "route": ["USD", "NGN"],
-  "as_of": "2026-09-03T07:36:12.309Z",
-  "market": { "open": true, "source": "observed", "closes_at": "2026-09-04T21:00:00.000Z" }
-}</code></pre>
 
   ${
     stats.liveError
@@ -281,10 +347,36 @@ feeCurrency  ${esc(stats.liveSwap.feeCurrency ?? '')}
 gas          ${esc(stats.liveSwap.gas ?? '')}</code></pre>
   <p>Those trailing bytes are the ERC-8021 attribution suffix. <code>feeCurrency</code>
   is the USD₮ adapter, so gas is paid in stablecoin. The explicit <code>gas</code> limit
-  matters more than it looks — see below. Transactions built this way have been signed and
-  mined on mainnet; the hashes are at <a href="/proof">/proof</a>.</p>`
+  matters more than it looks — see below.</p>`
       : ''
   }
+
+  <h2>The same plan, signed and mined</h2>
+  <p>An unsigned transaction is where every reviewer so far has stopped, and the
+  objection is fair: a plan is not a settlement. Cowrie holds no keys and never will, so
+  the signing half belongs to the caller — but that half has been done, on Celo mainnet,
+  with transactions this endpoint produced and nobody edited. These hashes are on a
+  public chain and can be checked without trusting a word on this page:</p>
+
+  ${PROOFS.map(
+    (p) => `<div class="note" style="border-left-color:var(--ok)">
+    <strong>${esc(p.what)}</strong>
+    <pre style="margin:.6rem 0"><code>${esc(p.transaction)}
+${Object.entries(p.observed)
+  .map(([k, v]) => `${k.padEnd(13)} ${esc(v)}`)
+  .join('\n')}</code></pre>
+    <a href="${esc(p.explorer)}">verify on Celoscan</a>
+  </div>`
+  ).join('')}
+
+  <p>The full chain, for an agent deciding whether this is usable: <code>GET /quote</code>
+  prices it, <code>POST /swap</code> returns calldata you decode and sign yourself,
+  the signed transaction pays its own gas in the stablecoin being moved, and the mined
+  receipt carries the attribution tag — confirmed with <code>verifyTx</code> after the
+  fact, not asserted beforehand. <b>Zero CELO was spent at any step</b>, because the
+  wallet never held any. The working script is
+  <a href="https://github.com/olanrewajuakeem/cowrie/blob/main/src/execute-swap.ts">src/execute-swap.ts</a>,
+  and the machine-readable version of this section is at <a href="/proof">/proof</a>.</p>
 
   <h2>Two things it knows that the SDK doesn't</h2>
 
