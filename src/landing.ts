@@ -121,6 +121,22 @@ export interface LiveStats {
 const esc = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
+/**
+ * Whether the rendered error payload actually carries a last-known rate.
+ *
+ * All five round-four reviewers caught this page promising a `last_known`
+ * block that the response beside it did not contain. The field is genuinely
+ * optional — it exists only once this instance has observed the pair price at
+ * least once, and a serverless deployment whose cache was populated after the
+ * feed went quiet has never seen one. The prose is now derived from the
+ * payload rather than written alongside it, so the two cannot disagree again.
+ */
+function hasLastKnown(body: unknown): boolean {
+  if (typeof body !== 'object' || body === null) return false
+  const err = (body as { error?: unknown }).error
+  return typeof err === 'object' && err !== null && 'last_known' in err
+}
+
 const json = (v: unknown) => esc(JSON.stringify(v, null, 2))
 
 function errorSection(): string {
@@ -295,12 +311,25 @@ HTTP/1.1 ${stats.liveOracle.status}   ·   ${stats.liveOracle.ms} ms   ·   Celo
 
 ${json(stats.liveOracle.body)}</code></pre>
   <p>This is the difference between a failure and a usable failure. There is a stable
-  <code>code</code> to branch on, a <code>retry_after</code> in seconds so a caller knows
-  when to come back rather than hammering, and a <code>last_known</code> rate with its own
-  age and an explicit warning that it is indicative and not executable. An agent can act on
-  every one of those without a human reading a message. Dollar-denominated pairs are
-  unaffected and keep pricing throughout — the transcript above was served from the same
-  request as this one.</p>`
+  <code>code</code> to branch on and a <code>retry_after</code> in seconds, so a caller
+  knows when to come back instead of hammering. An agent can act on both without a human
+  reading a message.</p>
+  ${
+    hasLastKnown(stats.liveOracle.body)
+      ? `<p>This response also carries <code>last_known</code>: the last rate this instance
+  actually observed for the pair, with its age in seconds and an explicit warning that it
+  is indicative and not executable. It is a fallback for estimation, never a price to
+  trade on.</p>`
+      : `<p><b>Note what is absent.</b> <code>last_known</code> is an optional field, and
+  it is missing here. It holds the last rate this instance observed for the pair, and this
+  deployment has never seen the naira feed price — it went quiet before this instance's
+  cache was populated, so there is nothing honest to put there. A cached rate from some
+  other machine would be a fabricated observation, which is the one thing a service like
+  this must never serve. The field is documented as optional at
+  <a href="/errors">/errors</a> and appears when there is a real observation behind it.</p>`
+  }
+  <p>Dollar-denominated pairs are unaffected and keep pricing throughout — the transcript
+  above was served from the same request as this one.</p>`
       : ''
   }
 
@@ -351,12 +380,23 @@ gas          ${esc(stats.liveSwap.gas ?? '')}</code></pre>
       : ''
   }
 
+  <h2>Where Cowrie stops, deliberately</h2>
+  <p>There is no endpoint that will sign or broadcast for you, and there will not be.
+  An FX service that can sign is an FX service that can empty the wallet, and every
+  caller would have to trust it not to. Cowrie holds no keys, takes no custody, and
+  cannot move your funds even if it wanted to — <code>POST /swap</code> returns calldata
+  you decode, inspect, and sign yourself. <b>That boundary is the product, not a missing
+  feature.</b></p>
+  <p>It costs an agent nothing it does not already have: anything holding stablecoins
+  holds a private key, and signing is two lines of viem. What it buys is that a
+  compromised Cowrie can produce a bad quote — which <code>min_amount_out</code> and
+  <code>deadline</code> make revert — but can never produce a transfer.</p>
+
   <h2>The same plan, signed and mined</h2>
-  <p>An unsigned transaction is where every reviewer so far has stopped, and the
-  objection is fair: a plan is not a settlement. Cowrie holds no keys and never will, so
-  the signing half belongs to the caller — but that half has been done, on Celo mainnet,
-  with transactions this endpoint produced and nobody edited. These hashes are on a
-  public chain and can be checked without trusting a word on this page:</p>
+  <p>A plan is not a settlement, so here is the settlement. The transactions below were
+  built by this endpoint, signed by an ordinary wallet, and mined on Celo mainnet with
+  nobody editing them in between. The hashes are on a public chain and can be checked
+  without trusting a word on this page:</p>
 
   ${PROOFS.map(
     (p) => `<div class="note" style="border-left-color:var(--ok)">
