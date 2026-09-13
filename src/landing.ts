@@ -243,7 +243,8 @@ export function landingPage(stats: LiveStats): string {
 <div class="wrap">
 
   <h1>Cowrie</h1>
-  <p class="lede">Foreign exchange for autonomous agents, on Celo.</p>
+  <p class="lede">Foreign exchange for autonomous agents, on Celo.
+  They bring the keys; Cowrie brings the price and the calldata.</p>
 
   <div class="facts">
     <span class="fact"><b>${stats.tradable}</b> tradable currencies</span>
@@ -338,6 +339,11 @@ ${json(stats.liveOracle.body)}</code></pre>
   assumes nobody did — it takes payment per call over <a href="https://x402.org">x402</a>,
   from the wallet the agent already has.</p>
 
+  <p>It covers pricing and transaction construction, and stops there on purpose. Cowrie
+  never takes custody and never signs, so the one thing it asks of a caller is the one
+  thing any agent holding funds already has: a key.
+  <a href="#boundary">Where that line falls, and why</a>.</p>
+
   <div class="note">
     <strong>Reading this at a weekend?</strong>
     Naira and every other FX pair will return <code>market_closed</code> with a retry
@@ -380,7 +386,7 @@ gas          ${esc(stats.liveSwap.gas ?? '')}</code></pre>
       : ''
   }
 
-  <h2>Where Cowrie stops, deliberately</h2>
+  <h2 id="boundary">Where Cowrie stops, deliberately</h2>
   <p>There is no endpoint that will sign or broadcast for you, and there will not be.
   An FX service that can sign is an FX service that can empty the wallet, and every
   caller would have to trust it not to. Cowrie holds no keys, takes no custody, and
