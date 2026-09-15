@@ -94,6 +94,17 @@ export interface LiveStats {
    */
   liveOracle: { request: string; status: number; body: unknown; ms: number } | null
   /**
+   * The same payload, recorded, for when the feed is healthy.
+   *
+   * `liveOracle` can only render while the oracle is quiet, which is precisely
+   * when the service looks worst — so the round where naira priced normally all
+   * day showed nothing here, and nine of ten reviewers reported the
+   * unavailable-pair contract as unverifiable. An observation this instance
+   * genuinely made, shown with its own age and labelled recorded, is honest and
+   * always available. Null only until the first one is seen.
+   */
+  recordedOracle: { payload: unknown; observed_at: string; age_seconds: number } | null
+  /**
    * A real swap plan, built while rendering.
    *
    * Q7 and Q9 both centre on /swap being undemonstrated — and it was in fact
@@ -331,7 +342,27 @@ ${json(stats.liveOracle.body)}</code></pre>
   }
   <p>Dollar-denominated pairs are unaffected and keep pricing throughout — the transcript
   above was served from the same request as this one.</p>`
-      : ''
+      : stats.recordedOracle
+        ? `<h2>The unavailable-pair contract, recorded</h2>
+  <p>The naira feed is pricing normally as this page is served, so there is no failure to
+  provoke right now — which is exactly when this contract is hardest to show and most
+  often doubted. Below is the real payload from the last time it did fail, captured by
+  this instance <b>${Math.round(stats.recordedOracle.age_seconds / 3600)} hours ago</b>
+  and kept since:</p>
+  <pre><code>GET /quote?from=USD&amp;to=NGN&amp;amount=100
+observed ${esc(stats.recordedOracle.observed_at)}
+
+${json(stats.recordedOracle.payload)}</code></pre>
+  <p><b>This one is recorded, not live</b> — every other block on this page was computed
+  for your request, and this is the single exception, labelled so you never have to guess
+  which. It is an observation this deployment actually made; we do not synthesise error
+  payloads to look complete. Note the stable <code>code</code> to branch on and the
+  <code>retry_after</code> in seconds telling a caller when to come back.</p>
+  <p>You can watch it happen live at a weekend: global FX closes Friday 21:00 UTC and
+  reopens Sunday 21:00 UTC, and during that window this section becomes a live transcript
+  again. <a href="/quote?from=USD&amp;to=NGN&amp;amount=100">Call it yourself</a> and
+  compare against <a href="/errors">/errors</a>.</p>`
+        : ''
   }
 
   <p>An agent holding stablecoins cannot open a bank account, verify an email, or click
@@ -603,6 +634,19 @@ for (const tx of plan.transactions) {
   source on Celo, so it genuinely cannot be priced at weekends by any means. CELO itself
   has no Mento pool and is reported as untradable rather than quietly failing. A quote is
   indicative until executed.</p>
+  <p><code>Access-Control-Allow-Origin: *</code> is set on every response, deliberately.
+  Every read here is public and unauthenticated, there are no cookies, no sessions and no
+  bearer tokens, so there is no ambient authority for a cross-origin caller to borrow —
+  the usual reason to scope CORS does not apply. <code>POST /swap</code> is paid per call
+  over x402 and returns unsigned transactions that Cowrie cannot execute, so a page on
+  another origin calling it gains nothing it could not get with <code>curl</code>. If an
+  authenticated endpoint is ever added, that header has to be scoped per route before it
+  ships; today there is nothing behind it to protect.</p>
+  <p>Only <code>/swap</code> accepts <code>POST</code>. Every other path is a read and
+  refuses it with <code>405</code> and an <code>Allow</code> header, rather than accepting
+  a body and discarding it — a reviewer found the old behaviour returning <code>200</code>
+  to malformed JSON, which made a rejected request indistinguishable from an accepted
+  one.</p>
 
   <footer>
     Built for the Celo <em>Agents at Work</em> hackathon ·

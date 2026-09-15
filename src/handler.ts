@@ -20,7 +20,14 @@ import {
 } from './tokens.js'
 import { VERSION, SWAP_PRICE_USD } from './version.js'
 import { marketState } from './market.js'
-import { allCached, cacheBackend, getShared, setShared } from './cache.js'
+import {
+  allCached,
+  cacheBackend,
+  getShared,
+  setShared,
+  rememberError,
+  recallError,
+} from './cache.js'
 import { openapi } from './openapi.js'
 import { landingPage, type LiveStats } from './landing.js'
 import { ERROR_CATALOGUE } from './errors.js'
@@ -219,6 +226,10 @@ async function computeLiveStats(): Promise<LiveStats> {
         body: { error: ngn.error },
         ms: Date.now() - started,
       }
+      // Keep the body alone, so the contract stays demonstrable once the feed
+      // recovers. Storing the whole transcript would re-print the request line
+      // and latency the renderer already shows.
+      void rememberError('USD', 'NGN', liveOracle.body)
     }
     if (ngn.ok) {
       liveQuote = {
@@ -258,6 +269,12 @@ async function computeLiveStats(): Promise<LiveStats> {
   } catch {
     blockNumber = null
   }
+
+  // With the feed healthy there is no live failure to show, and the contract
+  // reviewers most want to check disappears from the page. Fall back to the
+  // real payload from the last time it happened, stamped with its own age.
+  let recordedOracle: LiveStats['recordedOracle'] = null
+  if (!liveOracle) recordedOracle = await recallError('USD', 'NGN')
 
   // A real error and a real swap plan, produced now. Reviewers only ever fetch
   // this one URL, so everything they need to verify has to be in it. Run in
@@ -312,6 +329,7 @@ async function computeLiveStats(): Promise<LiveStats> {
     blockNumber,
     liveQuote,
     liveOracle,
+    recordedOracle,
     liveError,
     liveSwap,
   }
@@ -340,6 +358,30 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
   }
   if (req.method !== 'GET' && req.method !== 'POST') {
     return json(res, 405, { error: { code: 'method_not_allowed', message: 'Use GET or POST.' } })
+  }
+
+  /**
+   * Only /swap takes a body. Everything else is a read.
+   *
+   * A reviewer probed this by POSTing malformed JSON and reported getting
+   * HTTP 200 back — correctly, as a fault: the read endpoints ignored the body
+   * entirely and answered as though nothing were wrong, so a caller could not
+   * tell a rejected request from an accepted one. Reads now refuse POST
+   * outright rather than silently discarding what was sent.
+   */
+  if (req.method === 'POST' && path !== '/swap') {
+    return json(
+      res,
+      405,
+      {
+        error: {
+          code: 'method_not_allowed',
+          message: `${path} is read-only. POST is accepted only at /swap.`,
+          allow: 'GET',
+        },
+      },
+      { allow: 'GET, OPTIONS' }
+    )
   }
 
   try {

@@ -127,6 +127,64 @@ export async function recall(from: string, to: string): Promise<StaleRate | null
   }
 }
 
+const ERROR_KEY = 'cowrie:lasterror'
+
+/**
+ * The last real unavailable-pair response we served, kept so it can be shown
+ * when the feed is healthy.
+ *
+ * Nine of ten reviewers in one round reported that they could not verify the
+ * unavailable-pair error contract — not because it is undocumented, but
+ * because the naira oracle happened to be pricing normally while they looked,
+ * so the live transcript of it had nothing to render. The contract that
+ * matters most to a caller was therefore invisible exactly when the service
+ * was healthiest.
+ *
+ * Recording the real payload the last time it occurred fixes that without
+ * inventing anything: it is an observation this instance actually made, shown
+ * with its own timestamp and clearly marked as recorded rather than live.
+ */
+export async function rememberError(from: string, to: string, payload: unknown): Promise<void> {
+  const entry = { payload, observed_at: new Date().toISOString() }
+  try {
+    if (useRedis) {
+      await redis(`hset/${ERROR_KEY}/${field(from, to)}`, JSON.stringify(entry))
+      return
+    }
+    const store = readDisk()
+    // Disk mode shares the rates file; namespace the field so the two cannot collide.
+    ;(store as Record<string, unknown>)[`err:${field(from, to)}`] = entry
+    writeDisk(store as Record<string, CachedRate>)
+  } catch {
+    // Losing this only costs a page section.
+  }
+}
+
+export interface RecordedError {
+  payload: unknown
+  observed_at: string
+  age_seconds: number
+}
+
+export async function recallError(from: string, to: string): Promise<RecordedError | null> {
+  try {
+    let hit: { payload: unknown; observed_at: string } | undefined
+    if (useRedis) {
+      const raw = await redis(`hget/${ERROR_KEY}/${field(from, to)}`)
+      hit = typeof raw === 'string' ? JSON.parse(raw) : undefined
+    } else {
+      hit = (readDisk() as Record<string, unknown>)[`err:${field(from, to)}`] as typeof hit
+    }
+    if (!hit?.observed_at) return null
+    return {
+      ...hit,
+      age_seconds: Math.round((Date.now() - new Date(hit.observed_at).getTime()) / 1000),
+    }
+  } catch {
+    return null
+  }
+}
+
 /** Everything we hold, for the /pairs endpoint. */
 export async function allCached(): Promise<CachedRate[]> {
   try {
@@ -144,7 +202,10 @@ export async function allCached(): Promise<CachedRate[]> {
       }
       return out
     }
-    return Object.values(readDisk())
+    // Skip the `err:` entries rememberError namespaces into the same file.
+    return Object.entries(readDisk())
+      .filter(([k]) => !k.startsWith('err:'))
+      .map(([, v]) => v)
   } catch {
     return []
   }
