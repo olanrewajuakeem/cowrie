@@ -136,7 +136,8 @@ function serviceDescription() {
       'GET /openapi.json': 'OpenAPI 3.1 description of this API.',
       'GET /errors': 'Every error this API can return, with an example payload and how to handle it.',
       'GET /proof': 'Mined Celo mainnet transactions built by this API, so its claims can be checked rather than trusted.',
-      'GET /healthz': 'Standard health check: version, uptime, market state, cache backend.',
+      'GET /healthz':
+        'Standard health check: version, uptime, market state, cache backend. Also answers at /health and /api/health.',
       'GET /balance/{address}': 'Every non-zero balance that address holds across the currencies Cowrie knows, so an agent can check it can afford a swap before planning one.',
       'GET /currencies': 'Every supported currency with its ISO code and on-chain address.',
       'GET /pairs': 'Which pairs are quotable right now, and which are waiting on market hours.',
@@ -426,9 +427,14 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
       return json(res, 200, { ...serviceDescription(), live_proof: await liveProof() })
     }
 
-    if (path === '/healthz') {
+    if (path === '/healthz' || path === '/health' || path === '/api/health') {
       // Standard health check. Other Celo agent skills expect it at this path,
       // and a reviewer flagged its absence.
+      //
+      // /health and /api/health are aliases because a reviewer probed exactly
+      // those, got 404s, and concluded the service was "incomplete or
+      // misconfigured". Being right about the canonical path is worth less
+      // than being found.
       const open = await detectMarketOpen(RPC_URL)
       return json(res, 200, {
         ok: true,
@@ -661,8 +667,24 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
       return json(res, retryable ? 503 : 400, { error: result.error }, headers)
     }
 
+    /**
+     * A 404 that says what does exist.
+     *
+     * A reviewer probed /health, /api/health and /api/v1, got three bare 404s,
+     * and concluded "an agent cannot rely on this API for real exchange rates
+     * — the implementation appears incomplete or misconfigured". Every one of
+     * those guesses was wrong about the path and right about the experience:
+     * pointing at `/` and expecting a second request is no use to a caller
+     * that has already decided the service is broken. The list costs nothing
+     * and ends the guessing in one response.
+     */
     return json(res, 404, {
-      error: { code: 'not_found', message: `No endpoint at ${path}.`, see: '/' },
+      error: {
+        code: 'not_found',
+        message: `No endpoint at ${path}.`,
+        endpoints: Object.keys(serviceDescription().endpoints),
+        see: '/',
+      },
     })
   } catch (err) {
     return json(res, 500, {
