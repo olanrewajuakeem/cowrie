@@ -611,7 +611,15 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
       }
 
       const result = await getQuote(from, to, amount, RPC_URL)
-      if (result.ok) return json(res, 200, result.quote)
+      if (result.ok) {
+        // Freshness at the HTTP layer, not only in the body. A reviewer put it
+        // exactly right: `expires_at` is in the JSON, but without Cache-Control
+        // a client or proxy has to parse the body to learn a quote has gone
+        // stale. max-age mirrors max_age_seconds so the two cannot disagree.
+        return json(res, 200, result.quote, {
+          'cache-control': `public, max-age=${result.quote.max_age_seconds}, must-revalidate`,
+        })
+      }
 
       // 503 for "come back later", 400 for "you asked wrong". The distinction
       // matters: an agent should retry the first and never retry the second.

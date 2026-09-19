@@ -375,6 +375,41 @@ ${json(stats.recordedOracle.payload)}</code></pre>
   thing any agent holding funds already has: a key.
   <a href="#boundary">Where that line falls, and why</a>.</p>
 
+  <h2>The contract, in one table</h2>
+  <p>Status codes and the fields you branch on, up front rather than inferred from
+  examples — a reviewer noted the reference below listed purposes but not the codes each
+  endpoint returns, which meant reading the whole page to learn what a failure looks like.
+  Full parameter and response tables are further down; the machine-readable version is
+  <a href="/openapi.json">/openapi.json</a>.</p>
+  <table>
+    <tr><th>Endpoint</th><th>Success</th><th>Errors</th><th>Branch on</th></tr>
+    <tr>
+      <td><code>GET /quote</code></td>
+      <td><b>200</b> + <code>Cache-Control: max-age=${'${max_age_seconds}'}</code></td>
+      <td><b>400</b> <code>unsupported_currency</code>, <code>invalid_amount</code>, <code>invalid_request</code><br>
+          <b>503</b> <code>market_closed</code>, <code>rate_unavailable</code>, <code>upstream_error</code> + <code>Retry-After</code></td>
+      <td><code>amount_out</code> (string, authoritative), <code>expires_at</code>, <code>error.code</code>, <code>error.retry_after</code></td>
+    </tr>
+    <tr>
+      <td><code>POST /swap</code></td>
+      <td><b>200</b></td>
+      <td><b>402</b> <code>payment_required</code> (x402 challenge)<br>
+          <b>400</b> / <b>503</b> as above</td>
+      <td><code>transactions[]</code>, <code>min_amount_out</code>, <code>deadline</code>, <code>feeCurrency</code>, <code>gas</code></td>
+    </tr>
+    <tr>
+      <td>every read endpoint</td>
+      <td><b>200</b></td>
+      <td><b>404</b> <code>not_found</code> — the body lists every valid endpoint<br>
+          <b>405</b> <code>method_not_allowed</code> on <code>POST</code> to a read</td>
+      <td><code>error.code</code>, <code>error.endpoints</code></td>
+    </tr>
+  </table>
+  <p><b>4xx means fix the request and do not retry. 5xx means retry, and
+  <code>retry_after</code> says when.</b> Codes are stable and safe to branch on; the
+  complete catalogue with an example payload for each is at
+  <a href="/errors">/errors</a>.</p>
+
   <div class="note">
     <strong>Reading this at a weekend?</strong>
     Naira and every other FX pair will return <code>market_closed</code> with a retry
@@ -488,18 +523,18 @@ ${Object.entries(p.observed)
 
   <h2>Endpoints</h2>
   <table>
-    <tr><th>Endpoint</th><th>Purpose</th><th>Cost</th></tr>
-    <tr><td><a href="/">GET /</a></td><td>This page, or JSON for non-browsers</td><td class="free">free</td></tr>
-    <tr><td><a href="/openapi.json">GET /openapi.json</a></td><td>OpenAPI 3.1 description</td><td class="free">free</td></tr>
-    <tr><td><a href="/status">GET /status</a></td><td>Market state, observed from Mento</td><td class="free">free</td></tr>
-    <tr><td><a href="/currencies">GET /currencies</a></td><td>Currencies, addresses, tradability</td><td class="free">free</td></tr>
-    <tr><td><a href="/pairs">GET /pairs</a></td><td>Which pairs are quotable right now</td><td class="free">free</td></tr>
-    <tr><td><a href="/errors">GET /errors</a></td><td>Every error, machine-readable</td><td class="free">free</td></tr>
-    <tr><td><a href="/proof">GET /proof</a></td><td>Mined transactions this API produced</td><td class="free">free</td></tr>
-    <tr><td><a href="/healthz">GET /healthz</a></td><td>Health check — version, uptime, market state</td><td class="free">free</td></tr>
-    <tr><td><code>GET /balance/{address}</code></td><td>What an address holds, so you can check affordability before planning</td><td class="free">free</td></tr>
-    <tr><td><a href="/quote?from=USD&amp;to=NGN&amp;amount=100">GET /quote</a></td><td>Price a conversion</td><td class="free">free</td></tr>
-    <tr><td><code>POST /swap</code></td><td>Unsigned transactions that execute a conversion</td><td>$0.001</td></tr>
+    <tr><th>Endpoint</th><th>Purpose</th><th>Status</th><th>Cost</th></tr>
+    <tr><td><a href="/">GET /</a></td><td>This page, or JSON for non-browsers</td><td>200</td><td class="free">free</td></tr>
+    <tr><td><a href="/openapi.json">GET /openapi.json</a></td><td>OpenAPI 3.1 description</td><td>200</td><td class="free">free</td></tr>
+    <tr><td><a href="/status">GET /status</a></td><td>Market state, observed from Mento</td><td>200</td><td class="free">free</td></tr>
+    <tr><td><a href="/currencies">GET /currencies</a></td><td>Currencies, addresses, tradability</td><td>200</td><td class="free">free</td></tr>
+    <tr><td><a href="/pairs">GET /pairs</a></td><td>Which pairs are quotable right now</td><td>200</td><td class="free">free</td></tr>
+    <tr><td><a href="/errors">GET /errors</a></td><td>Every error, machine-readable</td><td>200</td><td class="free">free</td></tr>
+    <tr><td><a href="/proof">GET /proof</a></td><td>Mined transactions this API produced</td><td>200</td><td class="free">free</td></tr>
+    <tr><td><a href="/healthz">GET /healthz</a></td><td>Health check — version, uptime, market state</td><td>200</td><td class="free">free</td></tr>
+    <tr><td><code>GET /balance/{address}</code></td><td>What an address holds, so you can check affordability before planning</td><td>200 · 400</td><td class="free">free</td></tr>
+    <tr><td><a href="/quote?from=USD&amp;to=NGN&amp;amount=100">GET /quote</a></td><td>Price a conversion</td><td>200 · 400 · 503</td><td class="free">free</td></tr>
+    <tr><td><code>POST /swap</code></td><td>Unsigned transactions that execute a conversion</td><td>200 · 400 · 402 · 503</td><td>$0.001</td></tr>
   </table>
 
   <h3>GET /quote</h3>
@@ -561,6 +596,23 @@ ${Object.entries(p.observed)
     <tr><td><code>next_steps</code></td><td>object</td><td>How to sign and broadcast, with a worked example.</td></tr>
     <tr><td><code>attribution_tag</code></td><td>string</td><td>ERC-8021 tag appended to each transaction's calldata.</td></tr>
   </table>
+
+  <div class="note">
+    <strong>Lifecycle of a returned transaction.</strong>
+    A reviewer noted the payload says what the transactions are but not how long they
+    live or who manages the nonce, so here it is explicitly.
+    <p style="margin:.5rem 0 0"><b>No nonce is set.</b> Cowrie does not know your account
+    state and never asks for it — your signer fills the nonce at signing time, which is
+    what every wallet library does by default. Send the array in the order given and wait
+    for each receipt: two transactions signed against the same nonce means the second
+    replaces the first, and an approval that has not landed makes the swap revert.</p>
+    <p style="margin:.5rem 0 0"><b>The plan expires, the price does not drift.</b>
+    <code>deadline</code> is the hard stop — past it the swap reverts on-chain and costs
+    you gas, so re-plan rather than broadcast late. Within the deadline,
+    <code>min_amount_out</code> is the binding protection: the swap fills at or above it
+    or not at all. A plan is not reusable for a second conversion; call
+    <code>/swap</code> again.</p>
+  </div>
 
   <h2>From unsigned transactions to a settled conversion</h2>
   <p>Cowrie returns calldata and stops, because it holds no keys. Submission is yours.
