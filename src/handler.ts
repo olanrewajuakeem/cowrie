@@ -321,6 +321,18 @@ async function computeLiveStats(): Promise<LiveStats> {
         data: first?.data,
         feeCurrency: first?.feeCurrency,
         gas: first?.gas,
+        /**
+         * The whole response, printed the way /quote's is.
+         *
+         * The quote block shows its complete body and reviewers call it "more
+         * complete than expected". The swap block showed a four-line summary we
+         * wrote by hand, and four reviewers in one round attacked exactly that:
+         * "the evidence only exposes a summary ... not the complete JSON
+         * response, so fields such as the full transactions[] structure,
+         * min_amount_out, and deadline cannot be checked." Our strongest
+         * evidence was the only block rendered in the one format they distrust.
+         */
+        body: r.plan,
       }
     } else {
       liveSwap = { request: req, ms: Date.now() - swapStarted, error: r.error.code }

@@ -122,6 +122,8 @@ export interface LiveStats {
     count?: number
     firstTo?: string
     data?: string
+    /** The complete swap response, rendered verbatim like the quote body. */
+    body?: unknown
     feeCurrency?: string
     gas?: string
     error?: string
@@ -441,16 +443,19 @@ ${json(stats.recordedOracle.payload)}</code></pre>
   unsigned transaction(s) in ${stats.liveSwap.ms} ms, converting
   ${esc(stats.liveSwap.amount_in ?? '')} ${esc(stats.liveSwap.from ?? '')} into about
   ${esc(stats.liveSwap.expected_amount_out ?? '')} ${esc(stats.liveSwap.to ?? '')}.</p>
-  <pre><code>to           ${esc(stats.liveSwap.firstTo ?? '')}
-data         ${esc(stats.liveSwap.data ?? '')}
-feeCurrency  ${esc(stats.liveSwap.feeCurrency ?? '')}
-gas          ${esc(stats.liveSwap.gas ?? '')}</code></pre>
-  <p><b>That is the complete calldata, not an excerpt</b> — nothing is elided, so you can
-  decode it yourself and check it does what this page says before signing anything. The
-  trailing bytes are the ERC-8021 attribution suffix; decode them with
-  <code>fromDataSuffix</code> from <code>@celo/attribution-tags</code>.
-  <code>feeCurrency</code> is the USD₮ adapter, so gas is paid in stablecoin, and the
-  explicit <code>gas</code> limit matters more than it looks — see below.</p>`
+  <pre><code>$ curl -X POST "${BASE}/swap" -H "Content-Type: application/json" \\
+    -d '{"from":"USDT","to":"USD","amount":"1","recipient":"0x…"}'
+HTTP/1.1 200 OK   ·   ${stats.liveSwap.ms} ms   ·   Celo block ${esc(stats.blockNumber ?? '—')}
+
+${json(stats.liveSwap.body ?? {})}</code></pre>
+  <p><b>That is the entire response body, unedited</b> — every transaction, the complete
+  calldata with nothing elided, <code>min_amount_out</code>, <code>deadline</code>,
+  <code>next_steps</code> and all. Not a summary of it. Decode the calldata yourself and
+  check it does what this page says before signing anything; the trailing bytes are the
+  ERC-8021 attribution suffix, readable with <code>fromDataSuffix</code> from
+  <code>@celo/attribution-tags</code>. <code>feeCurrency</code> is the USD₮ adapter, so
+  gas is paid in stablecoin, and the explicit <code>gas</code> limit matters more than it
+  looks — see below.</p>`
       : ''
   }
 
