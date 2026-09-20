@@ -312,8 +312,13 @@ async function computeLiveStats(): Promise<LiveStats> {
         expected_amount_out: r.plan.expected_amount_out,
         count: r.plan.transactions.length,
         firstTo: first?.to,
-        dataHead: first?.data.slice(0, 26),
-        dataTail: first?.data.slice(-40),
+        // The complete calldata, not an abbreviation. It used to be printed as
+        // head…tail to save space, and reviewers read the ellipsis as evidence
+        // the transcript was hand-written: "truncated with trailing ellipsis,
+        // making it impossible to verify this is an actual live transcript
+        // versus a hand-written sample". Abbreviating the one field that proves
+        // the plan is real cost more than the bytes it saved.
+        data: first?.data,
         feeCurrency: first?.feeCurrency,
         gas: first?.gas,
       }

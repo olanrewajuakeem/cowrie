@@ -6,7 +6,7 @@
  * is exactly the kind of small inconsistency that makes a reader distrust
  * everything else. There is now one.
  */
-export const VERSION = '0.5.2'
+export const VERSION = '0.5.3'
 
 /** Price of one POST /swap call, in USD. Disclosed everywhere, not only at 402. */
 export const SWAP_PRICE_USD = Number(process.env.SWAP_PRICE_UNITS ?? '1000') / 1e6

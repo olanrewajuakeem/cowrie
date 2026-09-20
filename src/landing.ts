@@ -121,8 +121,7 @@ export interface LiveStats {
     expected_amount_out?: string
     count?: number
     firstTo?: string
-    dataHead?: string
-    dataTail?: string
+    data?: string
     feeCurrency?: string
     gas?: string
     error?: string
@@ -443,12 +442,15 @@ ${json(stats.recordedOracle.payload)}</code></pre>
   ${esc(stats.liveSwap.amount_in ?? '')} ${esc(stats.liveSwap.from ?? '')} into about
   ${esc(stats.liveSwap.expected_amount_out ?? '')} ${esc(stats.liveSwap.to ?? '')}.</p>
   <pre><code>to           ${esc(stats.liveSwap.firstTo ?? '')}
-data         ${esc(stats.liveSwap.dataHead ?? '')}…${esc(stats.liveSwap.dataTail ?? '')}
+data         ${esc(stats.liveSwap.data ?? '')}
 feeCurrency  ${esc(stats.liveSwap.feeCurrency ?? '')}
 gas          ${esc(stats.liveSwap.gas ?? '')}</code></pre>
-  <p>Those trailing bytes are the ERC-8021 attribution suffix. <code>feeCurrency</code>
-  is the USD₮ adapter, so gas is paid in stablecoin. The explicit <code>gas</code> limit
-  matters more than it looks — see below.</p>`
+  <p><b>That is the complete calldata, not an excerpt</b> — nothing is elided, so you can
+  decode it yourself and check it does what this page says before signing anything. The
+  trailing bytes are the ERC-8021 attribution suffix; decode them with
+  <code>fromDataSuffix</code> from <code>@celo/attribution-tags</code>.
+  <code>feeCurrency</code> is the USD₮ adapter, so gas is paid in stablecoin, and the
+  explicit <code>gas</code> limit matters more than it looks — see below.</p>`
       : ''
   }
 
